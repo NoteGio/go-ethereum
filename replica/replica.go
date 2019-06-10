@@ -20,7 +20,6 @@ import (
   "github.com/ethereum/go-ethereum/params"
   "github.com/ethereum/go-ethereum/log"
   "github.com/Shopify/sarama"
-  "math/big"
   "time"
   "fmt"
   "strings"
@@ -100,15 +99,15 @@ func (r *Replica) Start(server *p2p.Server) error {
         }
       }
       now := time.Now().Unix()
-      if r.maxBlockAge > 0 && now - currentBlock.Time().Int64() > r.maxBlockAge {
-        log.Error("Max block age exceeded.", "maxAgeSec", r.maxBlockAge, "realAge", common.PrettyAge(time.Unix(currentBlock.Time().Int64(), 0)))
+      if r.maxBlockAge > 0 && now - int64(currentBlock.Time()) > r.maxBlockAge {
+        log.Error("Max block age exceeded.", "maxAgeSec", r.maxBlockAge, "realAge", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
         os.Exit(1)
       }
       if r.maxOffsetAge > 0 && now - offsetTimestamp > r.maxOffsetAge {
         log.Error("Max offset age exceeded.", "maxAgeSec", r.maxBlockAge, "realAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
         os.Exit(1)
       }
-      log.Info("Replica Sync", "num", currentBlock.Number(), "hash", currentBlock.Hash(), "blockAge", common.PrettyAge(time.Unix(currentBlock.Time().Int64(), 0)), "offset", offset, "offsetAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
+      log.Info("Replica Sync", "num", currentBlock.Number(), "hash", currentBlock.Hash(), "blockAge", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)), "offset", offset, "offsetAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
     }
   }()
   return nil
@@ -143,7 +142,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   }
   if startupAge > 0 {
     log.Info("Waiting for current block time")
-    for big.NewInt(time.Now().Unix() - startupAge).Cmp(bc.GetBlockByHash(rawdb.ReadHeadBlockHash(db)).Time()) > 0 {
+    for time.Now().Unix() - startupAge > int64(bc.GetBlockByHash(rawdb.ReadHeadBlockHash(db)).Time()) {
       time.Sleep(100 * time.Millisecond)
     }
     log.Info("Block time is current. Starting replica.")
