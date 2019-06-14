@@ -56,6 +56,9 @@ system and acts as an RPC node based on the replicated data.
 			utils.KafkaTransactionTopicFlag,
 			utils.DataDirFlag,
 			utils.ReplicaSyncShutdownFlag,
+			utils.RPCEnabledFlag,
+			utils.RPCPortFlag,
+			utils.RPCListenAddrFlag,
 			utils.RPCCORSDomainFlag,
 			utils.ReplicaStartupMaxAgeFlag,
 			utils.ReplicaRuntimeMaxOffsetAgeFlag,
@@ -100,8 +103,8 @@ system and acts as an RPC node based on the replicated data.
 	}
 	nodeConfig = node.Config{
 		DataDir:          node.DefaultDataDir(),
-		HTTPHost:         "0.0.0.0",
-		HTTPPort:         node.DefaultHTTPPort,
+		// HTTPHost:         "0.0.0.0",
+		// HTTPPort:         node.DefaultHTTPPort,
 		HTTPModules:      []string{"net", "web3", "replica"},
 		HTTPVirtualHosts: []string{"*"},
 		WSPort:           node.DefaultWSPort,
