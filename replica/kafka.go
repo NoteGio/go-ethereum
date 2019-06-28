@@ -6,6 +6,7 @@ import (
   "fmt"
   "github.com/ethereum/go-ethereum/core/types"
   "github.com/ethereum/go-ethereum/rlp"
+  "github.com/ethereum/go-ethereum/ethdb/cdc"
   // "encoding/hex"
 )
 
@@ -42,6 +43,9 @@ func (producer *KafkaTransactionProducer) String() string {
 }
 
 func NewKafkaTransactionProducerFromURLs(brokers []string, topic string) (TransactionProducer, error) {
+  if err := cdc.CreateTopicIfDoesNotExist(brokers[0], topic); err != nil {
+    return nil, err
+  }
   config := sarama.NewConfig()
   config.Producer.Return.Successes=true
   producer, err := sarama.NewSyncProducer(brokers, config)

@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/ethdb/cdc"
 	"github.com/Shopify/sarama"
 	"gopkg.in/urfave/cli.v1"
 	"os"
@@ -61,6 +62,10 @@ func txrelay(ctx *cli.Context) error {
 	consumerGroupID := ctx.GlobalString(utils.KafkaTransactionConsumerGroupFlag.Name)
 	config := sarama.NewConfig()
 	config.Version = sarama.V2_1_0_0
+	if err := cdc.CreateTopicIfDoesNotExist(broker, topic); err != nil {
+		fmt.Println("Error creating topic")
+		return err
+	}
 	consumerGroup, err := sarama.NewConsumerGroup([]string{broker}, consumerGroupID, config)
 	if err != nil {
 		fmt.Printf("Looks like %v isn't available\n", broker)

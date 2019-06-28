@@ -42,8 +42,58 @@ func (producer *KafkaLogProducer) Emit(data []byte) error {
   return nil
 }
 
+func CreateTopicIfDoesNotExist(brokerAddr, topic string) error {
+  config := sarama.NewConfig()
+	config.Version = sarama.V2_1_0_0
+  client, err := sarama.NewClient([]string{brokerAddr}, config)
+  if err != nil {
+    return err
+  }
+  defer client.Close()
+  brokers := client.Brokers()
+  broker := brokers[0]
+  log.Info("Getting metadata")
+  broker.Open(config)
+  defer broker.Close()
+  response, err := broker.GetMetadata(&sarama.MetadataRequest{Topics: []string{topic}})
+  // log.Info("Got here", "err", err, "topics", *response.Topics[0])
+  if err != nil {
+    log.Error("Error getting metadata", "err", err)
+    return err
+  }
+  if len(response.Topics) == 0 || len(response.Topics[0].Partitions) == 0 {
+    log.Info("Attempting to create topic")
+    topicDetails := make(map[string]*sarama.TopicDetail)
+    configEntries := make(map[string]*string)
+    compressionType := "snappy"
+    configEntries["compression.type"] = &compressionType
+    topicDetails[topic] = &sarama.TopicDetail{
+      ConfigEntries: configEntries,
+      NumPartitions: 1,
+      ReplicationFactor: int16(len(brokers)),
+    }
+    r, err := broker.CreateTopics(&sarama.CreateTopicsRequest{
+      // Version: 2,
+      Timeout: 5 * time.Second,
+      TopicDetails: topicDetails,
+    })
+    if err != nil {
+      log.Error("Error creating topic", "error", err, "response", r)
+      return err
+    }
+    if err, _ := r.TopicErrors[topic]; err != nil && err.Err != sarama.ErrNoError {
+      log.Error("topic error", "err", err)
+      return err
+    }
+  }
+  return nil
+}
+
 func NewKafkaLogProducerFromURLs(brokers []string, topic string) (LogProducer, error) {
   config := sarama.NewConfig()
+  if err := CreateTopicIfDoesNotExist(brokers[0], topic); err != nil {
+    return nil, err
+  }
   producer, err := sarama.NewAsyncProducer(brokers, config)
   if err != nil {
     return nil, err
@@ -115,6 +165,9 @@ func NewKafkaLogConsumer(consumer sarama.Consumer, topic string, offset int64, c
 
 func NewKafkaLogConsumerFromURLs(brokers []string, topic string, offset int64) (LogConsumer, error) {
   config := sarama.NewConfig()
+  if err := CreateTopicIfDoesNotExist(brokers[0], topic); err != nil {
+    return nil, err
+  }
   client, err := sarama.NewClient(brokers, config)
   if err != nil {
     return nil, err
