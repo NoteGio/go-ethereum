@@ -50,8 +50,10 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string) error {
     return err
   }
   defer client.Close()
-  brokers := client.Brokers()
-  broker := brokers[0]
+  broker, err := client.Controller()
+  if err != nil {
+    return err
+  }
   log.Info("Getting metadata")
   broker.Open(config)
   defer broker.Close()
@@ -70,7 +72,7 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string) error {
     topicDetails[topic] = &sarama.TopicDetail{
       ConfigEntries: configEntries,
       NumPartitions: 1,
-      ReplicationFactor: int16(len(brokers)),
+      ReplicationFactor: int16(len(client.Brokers())),
     }
     r, err := broker.CreateTopics(&sarama.CreateTopicsRequest{
       // Version: 2,
@@ -85,6 +87,7 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string) error {
       log.Error("topic error", "err", err)
       return err
     }
+    log.Info("Topic created without errors")
   }
   return nil
 }
