@@ -140,6 +140,7 @@ var (
 		utils.KafkaLogTopicFlag,
 		utils.KafkaTransactionTopicFlag,
 		utils.KafkaTransactionConsumerGroupFlag,
+		utils.UseBadgerDBFlag,
 		utils.ReplicaSyncShutdownFlag,
 		utils.ReplicaStartupMaxAgeFlag,
 		utils.ReplicaRuntimeMaxOffsetAgeFlag,
@@ -213,6 +214,7 @@ func init() {
 		dumpConfigCommand,
 		replicaCommand,
 		txrelayCommand,
+		compactDbCommand,
 	}
 	sort.Sort(cli.CommandsByName(app.Commands))
 

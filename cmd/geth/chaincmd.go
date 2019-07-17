@@ -202,6 +202,19 @@ Use "ethereum sethead -2" to drop the two most recent blocks`,
 		Description: `
 Verify proofs of the latest block state trie. Exit 0 if correct, else exit 1`,
 	}
+	compactDbCommand = cli.Command{
+		Action:    utils.MigrateFlags(compactDb),
+		Name:      "compactdb",
+		Usage:     "Compacts the leveldb database",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.CacheFlag,
+			utils.SyncModeFlag,
+		},
+		Category: "BLOCKCHAIN COMMANDS",
+		Description: `
+Runs a full compaction on leveldb`,
+	}
 )
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
@@ -567,6 +580,20 @@ func verifyStateTrie(ctx *cli.Context) error {
 	// fmt.Printf("Rolled back chain to block %v\n", blockNumber)
 	return nil
 }
+
+func compactDb(ctx *cli.Context) error {
+	stack := makeFullNode(ctx)
+	_, db := utils.MakeChain(ctx, stack)
+	ldb := db.(*ethdb.LDBDatabase).LDB()
+	start := time.Now()
+	fmt.Println("Compacting entire database...")
+	if err := ldb.CompactRange(util.Range{}); err != nil {
+		utils.Fatalf("Compaction failed: %v", err)
+	}
+	fmt.Printf("Compaction done in %v.\n\n", time.Since(start))
+	return nil
+}
+
 // hashish returns true for strings that look like hashes.
 func hashish(x string) bool {
 	_, err := strconv.Atoi(x)

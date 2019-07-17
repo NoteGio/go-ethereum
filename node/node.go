@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/cdc"
+	"github.com/ethereum/go-ethereum/ethdb/badger"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/debug"
 	"github.com/ethereum/go-ethereum/log"
@@ -584,6 +585,8 @@ func (n *Node) OpenDatabase(name string, cache, handles int) (ethdb.Database, er
 		var err error
 	 	if n.config.DataDir == "" {
 			db = ethdb.NewMemDatabase()
+		} else if n.config.BadgerDB {
+			db, err = badger.NewDatabase(n.config.ResolvePath(name) + ".badgerdb")
 		} else {
 			db, err = ethdb.NewLDBDatabase(n.config.ResolvePath(name), cache, handles)
 	 	}

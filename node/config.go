@@ -162,6 +162,7 @@ type Config struct {
 	KafkaLogTopic string `toml:",omitempty"`
 	KafkaTransactionTopic string `toml:",omitempty"`
 	ReplicaSyncShutdown bool `toml:",omitempty"`
+	BadgerDB bool `toml:",omitempty"`
 
 }
 

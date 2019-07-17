@@ -21,10 +21,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/badger"
+	"github.com/ethereum/go-ethereum/ethdb/cdc"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/ethdb/cdc"
 )
 
 // ServiceContext is a collection of service independent options inherited from
@@ -65,6 +66,8 @@ func (ctx *ServiceContext) OpenRawDatabase(name string, cache int, handles int) 
 	var err error
 	if ctx.config.DataDir == "" {
 		db = ethdb.NewMemDatabase()
+	} else if ctx.config.BadgerDB {
+		db, err = badger.NewDatabase(ctx.config.ResolvePath(name) + ".badgerdb")
 	} else {
 		db, err = ethdb.NewLDBDatabase(ctx.config.ResolvePath(name), cache, handles)
 	}

@@ -609,6 +609,10 @@ var (
 		Usage: "Kafka transaction consumer group name",
 		Value: "geth-tx",
 	}
+	UseBadgerDBFlag = cli.BoolFlag{
+		Name: "use.badgerdb",
+		Usage: "Store data in badgerdb instead of leveldb",
+	}
 	ReplicaSyncShutdownFlag = cli.BoolFlag{
 		Name: "replica.syncshutdown",
 		Usage: "Shutdown replica when it has finished syncing from kafka",
@@ -1036,6 +1040,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	cfg.KafkaLogTopic = ctx.GlobalString(KafkaLogTopicFlag.Name)
 	cfg.KafkaTransactionTopic = ctx.GlobalString(KafkaTransactionTopicFlag.Name)
 	cfg.ReplicaSyncShutdown = ctx.GlobalBool(ReplicaSyncShutdownFlag.Name)
+	cfg.BadgerDB = ctx.GlobalBool(UseBadgerDBFlag.Name)
 
 	setDataDir(ctx, cfg)
 
