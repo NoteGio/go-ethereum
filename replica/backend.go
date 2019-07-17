@@ -43,7 +43,7 @@ type ReplicaBackend struct {
 	// Block synchronization seems to happen at the downloader under normaly circumstances
 func (backend *ReplicaBackend) Downloader() *downloader.Downloader {								// Seems to be used to get sync progress, cancel downloads {
   if backend.dl == nil {
-    backend.dl = downloader.New(downloader.FullSync, backend.db, backend.eventMux, backend.bc, nil, func(id string){})
+    backend.dl = downloader.New(downloader.FullSync, 0, backend.db, backend.eventMux, backend.bc, nil, func(id string){})
     backend.dl.Terminate()
   }
   return backend.dl
@@ -255,6 +255,11 @@ func (backend *ReplicaBackend) GetPoolNonce(ctx context.Context, addr common.Add
 	// 0,0
 func (backend *ReplicaBackend) Stats() (pending int, queued int) {
   return 0, 0
+}
+
+func (backend *ReplicaBackend) RPCGasCap() *big.Int {
+  // TODO: Make configurable
+  return big.NewInt(32000000)
 }
 
 	// Return empty maps
