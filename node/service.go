@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/cdc"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -42,10 +43,22 @@ type ServiceContext struct {
 // if no previous can be found) from within the node's data directory. If the
 // node is an ephemeral one, a memory database is returned.
 func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, namespace string) (ethdb.Database, error) {
+	var db ethdb.Database
+	var err error
 	if ctx.config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
+		db = rawdb.NewMemoryDatabase()
+	} else {
+		db, err := rawdb.NewLevelDBDatabase(ctx.config.ResolvePath(name), cache, handles, namespace)
+		if ctx.config.KafkaLogBroker != "" {
+	   producer, err := cdc.NewKafkaLogProducerFromURLs(
+	           []string{ctx.config.KafkaLogBroker},
+	           ctx.config.KafkaLogTopic,
+	   )
+	   if err != nil { return nil, err }
+	   // TODO: Add options for a readStream
+	   db = cdc.NewDBWrapper(db, producer, nil)
 	}
-	return rawdb.NewLevelDBDatabase(ctx.config.ResolvePath(name), cache, handles, namespace)
+	return db, err
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
@@ -54,18 +67,30 @@ func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, nam
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
 func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
+	var db ethdb.Database
+	var err error
 	if ctx.config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
-	}
-	root := ctx.config.ResolvePath(name)
+		db = rawdb.NewMemoryDatabase()
+	} else {
+		root := ctx.config.ResolvePath(name)
 
-	switch {
-	case freezer == "":
-		freezer = filepath.Join(root, "ancient")
-	case !filepath.IsAbs(freezer):
-		freezer = ctx.config.ResolvePath(freezer)
+		switch {
+		case freezer == "":
+			freezer = filepath.Join(root, "ancient")
+		case !filepath.IsAbs(freezer):
+			freezer = ctx.config.ResolvePath(freezer)
+		}
+		db, err := rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
+		if ctx.config.KafkaLogBroker != "" {
+	   producer, err := cdc.NewKafkaLogProducerFromURLs(
+	           []string{ctx.config.KafkaLogBroker},
+	           ctx.config.KafkaLogTopic,
+	   )
+	   if err != nil { return nil, err }
+	   // TODO: Add options for a readStream
+	   db = cdc.NewDBWrapper(db, producer, nil)
 	}
-	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
+	return db, err
 }
 
 // ResolvePath resolves a user path into the data directory if that was relative

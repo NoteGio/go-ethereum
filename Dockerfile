@@ -4,6 +4,7 @@ FROM golang:1.12-alpine as builder
 RUN apk add --no-cache make gcc musl-dev linux-headers git
 
 ADD . /go-ethereum
+RUN cd /go-ethereum && build/env.sh go get -v -u github.com/Shopify/sarama
 RUN cd /go-ethereum && make geth
 
 # Pull Geth into a second stage deploy alpine container

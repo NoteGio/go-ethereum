@@ -707,6 +707,48 @@ var (
 		Name:  "shh.restrict-light",
 		Usage: "Restrict connection between two whisper light clients",
 	}
+	KafkaLogBrokerFlag = cli.StringFlag{
+		 // TODO: Make this into a list, and if the argument is provided multiple
+		 // times append each occurrence
+		 Name: "kafka.broker",
+		 Usage: "Kafka broker hostname and port",
+	}
+	KafkaLogTopicFlag = cli.StringFlag{
+		 Name: "kafka.topic",
+		 Usage: "Kafka broker hostname and port",
+		 Value: "geth", // TODO: Maybe the default could be based on the Ethereum network we connect to
+	}
+	KafkaTransactionTopicFlag = cli.StringFlag{
+		 Name: "kafka.tx.topic",
+		 Usage: "Kafka transaction topic name",
+		 Value: "geth-tx",
+	}
+	KafkaTransactionConsumerGroupFlag = cli.StringFlag{
+		 Name: "kafka.tx.consumergroup",
+		 Usage: "Kafka transaction consumer group name",
+		 Value: "geth-tx",
+	}
+	// TODO: Consider consolidating this with exitwhensynced
+	ReplicaSyncShutdownFlag = cli.BoolFlag{
+		 Name: "replica.syncshutdown",
+		 Usage: "Shutdown replica when it has finished syncing from kafka",
+	}
+	ReplicaStartupMaxAgeFlag = cli.Int64Flag{
+		 Name: "replica.startup.age",
+		 Usage: "Do not start serving RPC while the latest block exceeds this age in seconds",
+		 Value: 0,
+	}
+	ReplicaRuntimeMaxOffsetAgeFlag = cli.Int64Flag{
+		 Name: "replica.offset.age",
+		 Usage: "If the replica has not received a message in this number of seconds, shut down.",
+		 Value: 0,
+	}
+	ReplicaRuntimeMaxBlockAgeFlag = cli.Int64Flag{
+		 Name: "replica.block.age",
+		 Usage: "If the replica's current block is older than this number of seconds, shut down.",
+		 Value: 0,
+	}
+
 
 	// Metrics flags
 	MetricsEnabledFlag = cli.BoolFlag{
@@ -1211,6 +1253,11 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
+	cfg.KafkaLogBroker = ctx.GlobalString(KafkaLogBrokerFlag.Name)
+	cfg.KafkaLogTopic = ctx.GlobalString(KafkaLogTopicFlag.Name)
+	cfg.KafkaTransactionTopic = ctx.GlobalString(KafkaTransactionTopicFlag.Name)
+	cfg.ReplicaSyncShutdown = ctx.GlobalBool(ReplicaSyncShutdownFlag.Name)
+
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
 

@@ -48,6 +48,9 @@ var (
 		ArgsUsage: "<genesisPath>",
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
+			utils.KafkaLogTopicFlag,
+			utils.KafkaLogBrokerFlag,
+			utils.KafkaTransactionTopicFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 		Description: `
@@ -193,6 +196,37 @@ Use "ethereum dump 0" to dump the genesis block.`,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 	}
+	setHeadCommand = cli.Command{
+		Action:    utils.MigrateFlags(setHead),
+		Name:      "sethead",
+		Usage:     "Sets the head block to a specific block",
+		ArgsUsage: "[<blockHash> | <blockNum> | <-blockCount>]...",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.CacheFlag,
+			utils.SyncModeFlag,
+			utils.KafkaLogBrokerFlag,
+			utils.KafkaLogTopicFlag,
+		},
+		Category: "BLOCKCHAIN COMMANDS",
+		Description: `
+The arguments are interpreted as block numbers, hashes, or a number of blocks to be rolled back.
+Use "ethereum sethead -2" to drop the two most recent blocks`,
+	}
+	verifyStateTrieCommand = cli.Command{
+     Action:    utils.MigrateFlags(verifyStateTrie),
+     Name:      "verifystatetrie",
+     Usage:     "Verfies the state trie",
+     Flags: []cli.Flag{
+       utils.DataDirFlag,
+       utils.CacheFlag,
+       utils.SyncModeFlag,
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Verify proofs of the latest block state trie. Exit 0 if correct, else exit 1`,
+	}
+
 )
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
@@ -546,6 +580,74 @@ func dump(ctx *cli.Context) error {
 	}
 	return nil
 }
+
+func setHead(ctx *cli.Context) error {
+	if len(ctx.Args()) < 1 {
+		utils.Fatalf("This command requires an argument.")
+	}
+	stack := makeFullNode(ctx)
+	chain, db := utils.MakeChain(ctx, stack)
+	arg := ctx.Args()[0]
+	blockNumber, err := strconv.Atoi(arg)
+	if err != nil {
+		block := chain.GetBlockByHash(common.HexToHash(arg))
+		blockNumber = int(block.Number().Int64())
+	} else if blockNumber < 0 {
+		latestHash := rawdb.ReadHeadBlockHash(db)
+		block := chain.GetBlockByHash(latestHash)
+		blockNumber = int(block.Number().Int64()) + blockNumber
+	}
+	if err := chain.SetHead(uint64(blockNumber)); err != nil {
+		fmt.Printf("Failed to set head to %v", blockNumber)
+		return err
+	}
+	chain.Stop()
+	db.Close()
+	fmt.Printf("Rolled back chain to block %v\n", blockNumber)
+	return nil
+}
+
+func verifyStateTrie(ctx *cli.Context) error {
+  stack := makeFullNode(ctx)
+  bc, db := utils.MakeChain(ctx, stack)
+  latestHash := rawdb.ReadHeadBlockHash(db)
+  block := bc.GetBlockByHash(latestHash)
+
+  tr, err := trie.New(block.Root(), trie.NewDatabase(db))
+  if err != nil {
+    log.Error(fmt.Sprintf("Unhandled trie error"))
+    return err
+  }
+  nodesToCheck := 1000000
+  if len(ctx.Args()) > 0 {
+    arg := ctx.Args()[0]
+    nodesToCheck, err = strconv.Atoi(arg)
+    if err != nil { return err }
+  }
+
+  iterators := []trie.NodeIterator{}
+  for i := 0; i < 256; i++ {
+    iterators = append(iterators, tr.NodeIterator([]byte{byte(i)}))
+  }
+  for i := 0; i < nodesToCheck; i += len(iterators) {
+    log.Info("Checking leaves", "checked", i, "limit", nodesToCheck)
+    for _, it := range iterators {
+      for it.Next(true) {
+        if it.Leaf() {
+          break
+        }
+      }
+      if err := it.Error(); err != nil {
+        return err
+      }
+    }
+  }
+  bc.Stop()
+  db.Close()
+  // fmt.Printf("Rolled back chain to block %v\n", blockNumber)
+  return nil
+}
+
 
 func inspect(ctx *cli.Context) error {
 	node, _ := makeConfigNode(ctx)
