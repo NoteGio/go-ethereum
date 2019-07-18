@@ -419,6 +419,12 @@
 			"revisionTime": "2016-06-18T19:32:21Z"
 		},
 		{
+			"checksumSHA1": "qP+EFPkTFfLukemzBshHawzuH20=",
+			"path": "github.com/shopify/sarama",
+			"revision": "93e48db37537df7988c205c840bba0ea2b3ff7d9",
+			"revisionTime": "2019-06-23T12:49:32Z"
+		},
+		{
 			"checksumSHA1": "I7gkZEZn9PKJ+dzuBYLbFIUzNO4=",
 			"path": "github.com/status-im/keycard-go/derivationpath",
 			"revision": "8537d3370df43a30a3d450c023783d2e43432b89",

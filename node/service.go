@@ -48,7 +48,7 @@ func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, nam
 	if ctx.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
-		db, err := rawdb.NewLevelDBDatabase(ctx.config.ResolvePath(name), cache, handles, namespace)
+		db, err = rawdb.NewLevelDBDatabase(ctx.config.ResolvePath(name), cache, handles, namespace)
 		if ctx.config.KafkaLogBroker != "" {
 	   producer, err := cdc.NewKafkaLogProducerFromURLs(
 	           []string{ctx.config.KafkaLogBroker},
@@ -57,6 +57,7 @@ func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, nam
 	   if err != nil { return nil, err }
 	   // TODO: Add options for a readStream
 	   db = cdc.NewDBWrapper(db, producer, nil)
+		}
 	}
 	return db, err
 }
@@ -65,32 +66,37 @@ func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, nam
 // creates one if no previous can be found) from within the node's data directory,
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
-// memory database is returned.
+// memory database is returned. If a KafkaLogBroker config is provided, all
+// write operations will be sent to Kafka.
 func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
-	var db ethdb.Database
-	var err error
-	if ctx.config.DataDir == "" {
-		db = rawdb.NewMemoryDatabase()
-	} else {
-		root := ctx.config.ResolvePath(name)
-
-		switch {
-		case freezer == "":
-			freezer = filepath.Join(root, "ancient")
-		case !filepath.IsAbs(freezer):
-			freezer = ctx.config.ResolvePath(freezer)
-		}
-		db, err := rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
-		if ctx.config.KafkaLogBroker != "" {
-	   producer, err := cdc.NewKafkaLogProducerFromURLs(
-	           []string{ctx.config.KafkaLogBroker},
-	           ctx.config.KafkaLogTopic,
-	   )
-	   if err != nil { return nil, err }
-	   // TODO: Add options for a readStream
-	   db = cdc.NewDBWrapper(db, producer, nil)
+	db, err := ctx.OpenRawDatabaseWithFreezer(name, cache, handles, freezer, namespace)
+	if ctx.config.KafkaLogBroker != "" {
+   producer, err := cdc.NewKafkaLogProducerFromURLs(
+           []string{ctx.config.KafkaLogBroker},
+           ctx.config.KafkaLogTopic,
+   )
+   if err != nil { return nil, err }
+   // TODO: Add options for a readStream
+   db = cdc.NewDBWrapper(db, producer, nil)
 	}
 	return db, err
+}
+
+// OpenRawDatabaseWithFreezer returns a database equivalent to
+// OpenDatabaseWithFreezer, but it will never be wrapped to send write
+// operations to Kafka.
+func (ctx *ServiceContext) OpenRawDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
+	if ctx.config.DataDir == "" {
+		return rawdb.NewMemoryDatabase(), nil
+	}
+	root := ctx.config.ResolvePath(name)
+	switch {
+	case freezer == "":
+		freezer = filepath.Join(root, "ancient")
+	case !filepath.IsAbs(freezer):
+		freezer = ctx.config.ResolvePath(freezer)
+	}
+	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
 }
 
 // ResolvePath resolves a user path into the data directory if that was relative

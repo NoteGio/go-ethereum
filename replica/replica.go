@@ -45,7 +45,7 @@ func (r *Replica) Protocols() []p2p.Protocol {
 func (r *Replica) APIs() []rpc.API {
   backend := &ReplicaBackend{
     db: r.db,
-    indexDb: ethdb.NewTable(r.db, string(rawdb.BloomBitsIndexPrefix)),
+    indexDb: rawdb.NewTable(r.db, string(rawdb.BloomBitsIndexPrefix)),
     hc: r.hc,
     chainConfig: r.chainConfig,
     bc: r.bc,
@@ -136,7 +136,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   if err != nil {
     return nil, err
   }
-  bc, err := core.NewBlockChain(db, &core.CacheConfig{Disabled: true}, chainConfig, engine, vm.Config{}, nil)
+  bc, err := core.NewBlockChain(db, &core.CacheConfig{}, chainConfig, engine, vm.Config{}, nil)
   if err != nil {
     return nil, err
   }

@@ -43,7 +43,8 @@ type ReplicaBackend struct {
 	// Block synchronization seems to happen at the downloader under normaly circumstances
 func (backend *ReplicaBackend) Downloader() *downloader.Downloader {								// Seems to be used to get sync progress, cancel downloads {
   if backend.dl == nil {
-    backend.dl = downloader.New(downloader.FullSync, 0, backend.db, backend.eventMux, backend.bc, nil, func(id string){})
+                             // checkpoint uint64, stateDb ethdb.Database, stateBloom *trie.SyncBloom, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn
+    backend.dl = downloader.New(0, backend.db, nil, backend.eventMux, backend.bc, nil, func(id string){})
     backend.dl.Terminate()
   }
   return backend.dl
@@ -69,7 +70,7 @@ func (backend *ReplicaBackend) EventMux() *event.TypeMux {
 }
 func (backend *ReplicaBackend) AccountManager() *accounts.Manager {
   if backend.accountManager == nil {
-    backend.accountManager = accounts.NewManager()
+    backend.accountManager = accounts.NewManager(&accounts.Config{false})
   }
   return backend.accountManager
 }
@@ -285,10 +286,18 @@ func (backend *ReplicaBackend) CurrentBlock() *types.Block {
   latestHash := rawdb.ReadHeadBlockHash(backend.db)
   return backend.bc.GetBlockByHash(latestHash)
 }
+func (backend *ReplicaBackend) ExtRPCEnabled() bool {
+  // TODO: Pass in whether or not we're actually serving RPC
+  return true
+}
+func (backend *ReplicaBackend) GetTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(backend.db, txHash)
+	return tx, blockHash, blockNumber, index, nil
+}
 func NewTestReplicaBackend(db ethdb.Database, hc *core.HeaderChain, bc *core.BlockChain, tp TransactionProducer) (*ReplicaBackend) {
   return &ReplicaBackend{
     db: db,
-    indexDb: ethdb.NewTable(db, string(rawdb.BloomBitsIndexPrefix)),
+    indexDb: rawdb.NewTable(db, string(rawdb.BloomBitsIndexPrefix)),
     hc: hc,
     chainConfig: params.AllEthashProtocolChanges,
     bc: bc,

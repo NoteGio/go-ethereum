@@ -1,7 +1,6 @@
 package cdc
 import (
   "github.com/ethereum/go-ethereum/ethdb"
-  "github.com/syndtr/goleveldb/leveldb/iterator"
   "github.com/ethereum/go-ethereum/rlp"
   "github.com/pborman/uuid"
 )
@@ -62,6 +61,11 @@ func (batch *BatchWrapper) Write() error {
   return batch.batch.Write()
 }
 
+// Replay replays the batch contents.
+func (batch *BatchWrapper) Replay(w ethdb.KeyValueWriter) error {
+	return batch.batch.Replay(w)
+}
+
 type DBWrapper struct {
   db ethdb.Database
   writeStream LogProducer
@@ -106,14 +110,79 @@ func (db *DBWrapper) Delete(key []byte) error {
   return db.db.Delete(key)
 }
 
-func (db *DBWrapper) Close() {
+// AppendAncient injects all binary blobs belong to block at the end of the
+// append-only immutable table files.
+func (db *DBWrapper) AppendAncient(number uint64, hash, header, body, receipt, td []byte) error {
+  if db.writeStream != nil {
+    op, err := AppendAncientOperation(number, hash, header, body, receipt, td)
+    if err != nil { return err }
+    if err = db.writeStream.Emit(op.Bytes()); err != nil { return err }
+  }
+  return db.db.AppendAncient(number, hash, header, body, receipt, td)
+}
+
+// TruncateAncients discards all but the first n ancient data from the ancient store.
+func (db *DBWrapper) TruncateAncients(n uint64) error {
+  if db.writeStream != nil {
+    op, err := TruncateAncientsOperation(n)
+    if err != nil { return err }
+    if err = db.writeStream.Emit(op.Bytes()); err != nil { return err }
+  }
+  return db.db.TruncateAncients(n)
+}
+
+// Sync flushes all in-memory ancient store data to disk.
+func (db *DBWrapper) Sync() error {
+  if db.writeStream != nil {
+    op, err := SyncOperation()
+    if err != nil { return err }
+    if err = db.writeStream.Emit(op.Bytes()); err != nil { return err }
+  }
+  return db.db.Sync()
+}
+
+// HasAncient returns an indicator whether the specified data exists in the
+// ancient store.
+func (db *DBWrapper) HasAncient(kind string, number uint64) (bool, error) {
+  return db.db.HasAncient(kind, number)
+}
+
+// Ancient retrieves an ancient binary blob from the append-only immutable files.
+func (db *DBWrapper) Ancient(kind string, number uint64) ([]byte, error) {
+  return db.db.Ancient(kind, number)
+}
+
+// Ancients returns the ancient item numbers in the ancient store.
+func (db *DBWrapper) Ancients() (uint64, error) {
+  return db.db.Ancients()
+}
+
+// AncientSize returns the ancient size of the specified category.
+func (db *DBWrapper) AncientSize(kind string) (uint64, error) {
+  return db.db.AncientSize(kind)
+}
+
+func (db *DBWrapper) Compact(start []byte, limit []byte) error {
+  // Note: We're not relaying the compact instruction to replicas. At present,
+  // this seems to only be called from command-line tools and debug APIs. We
+  // generally want to manage compaction of replicas at snapshotting time, and
+  // not have it get triggered at runtime. This may need to be revisited in the
+  // future.
+  return db.db.Compact(start, limit)
+}
+
+func (db*DBWrapper) Stat(property string) (string, error) {
+  return db.db.Stat(property)
+}
+
+func (db *DBWrapper) Close() error {
   if db.writeStream != nil {
     db.writeStream.Close()
   }
   if db.readStream != nil {
     db.readStream.Close()
   }
-  db.db.Close()
+  return db.db.Close()
 }
 
 func (db *DBWrapper) NewBatch() ethdb.Batch {
@@ -121,8 +190,23 @@ func (db *DBWrapper) NewBatch() ethdb.Batch {
   return &BatchWrapper{dbBatch, db.writeStream, []BatchOperation{}, uuid.NewRandom()}
 }
 
-func (db *DBWrapper) NewIterator() iterator.Iterator {
-  return db.db.(ethdb.IterableDatabase).NewIterator()
+// NewIterator creates a binary-alphabetical iterator over the entire keyspace
+// contained within the key-value database.
+func (db *DBWrapper) NewIterator() ethdb.Iterator {
+  return db.db.NewIterator()
+}
+
+// NewIteratorWithStart creates a binary-alphabetical iterator over a subset of
+// database content starting at a particular initial key (or after, if it does
+// not exist).
+func (db *DBWrapper) NewIteratorWithStart(start []byte) ethdb.Iterator {
+  return db.db.NewIteratorWithStart(start)
+}
+
+// NewIteratorWithPrefix creates a binary-alphabetical iterator over a subset
+// of database content with a particular key prefix.
+func (db *DBWrapper) NewIteratorWithPrefix(prefix []byte) ethdb.Iterator {
+  return db.db.NewIteratorWithPrefix(prefix)
 }
 
 func NewDBWrapper(db ethdb.Database, writeStream, readStream LogProducer) ethdb.Database {

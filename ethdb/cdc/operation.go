@@ -10,7 +10,6 @@ import (
   "time"
 )
 
-// TODO: Add OpHeartbeat + Hearbeat loop
 const (
   OpPut byte = 0
   OpDelete byte = 1
@@ -18,6 +17,9 @@ const (
   OpHeartbeat byte = 3
   OpGet byte = 4
   OpHas byte = 5
+  OpAppendAncient byte = 6
+  OpTruncateAncients byte = 7
+  OpSync byte = 8
 )
 
 
@@ -47,6 +49,15 @@ type BatchOperation struct {
   Data []byte
 }
 
+type AncientData struct {
+  Number uint64
+  Hash []byte
+  Header []byte
+  Body []byte
+  Receipt []byte
+  Td []byte
+}
+
 func (op *BatchOperation) Bytes() ([]byte) {
   data := []byte{255, op.Op}
   data = append(data, op.Batch...)
@@ -73,7 +84,7 @@ type Operation struct {
   Topic string
 }
 
-func updateOffset(putter ethdb.Putter, op *Operation) error {
+func updateOffset(putter ethdb.KeyValueWriter, op *Operation) error {
   if op.Offset != 0 {
     buf := make([]byte, binary.MaxVarintLen64*2)
     binary.PutVarint(buf[0:binary.MaxVarintLen64], op.Offset)
@@ -98,6 +109,17 @@ func (op *Operation) Apply(db ethdb.Database) error {
     // For OpDelete, op.Data is the key to be deleted
     db.Delete(op.Data)
     if err := updateOffset(db, op); err != nil { return err }
+  case OpAppendAncient:
+    a := &AncientData{}
+    if err := rlp.DecodeBytes(op.Data, a); err != nil { return err }
+    if err := db.AppendAncient(a.Number, a.Hash, a.Header, a.Body, a.Receipt, a.Td); err != nil { return err}
+  case OpTruncateAncients:
+    var n uint64
+    if err := rlp.DecodeBytes(op.Data, &n); err != nil { return err }
+    if err := db.TruncateAncients(n); err != nil { return err }
+  case OpSync:
+    if err := db.Sync(); err != nil { return err }
+    if err := updateOffset(db, op);  err != nil { return err }
   case OpWrite:
     batch := db.NewBatch()
     var operations []BatchOperation
@@ -168,6 +190,30 @@ func PutOperation(key, value []byte) (*Operation, error) {
   data, err := rlp.EncodeToBytes(KeyValue{key, value})
   if err != nil { return nil, err }
   op.Data = data
+  return op, nil
+}
+
+func AppendAncientOperation(number uint64, hash, header, body, receipt, td []byte) (*Operation, error) {
+  op := &Operation{}
+  op.Op = OpAppendAncient
+  data, err := rlp.EncodeToBytes(AncientData{number, hash, header, body, receipt, td})
+  if err != nil { return nil, err }
+  op.Data = data
+  return op, nil
+}
+
+func TruncateAncientsOperation(n uint64) (*Operation, error) {
+  op := &Operation{}
+  op.Op = OpTruncateAncients
+  data, err := rlp.EncodeToBytes(n)
+  if err != nil { return nil, err }
+  op.Data = data
+  return op, nil
+}
+
+func SyncOperation() (*Operation, error) {
+  op := &Operation{}
+  op.Op = OpSync
   return op, nil
 }
 

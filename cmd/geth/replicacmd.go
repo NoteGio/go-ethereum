@@ -157,7 +157,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	utils.SetShhConfig(ctx, stack, &cfg.Shh)
 	utils.SetDashboardConfig(ctx, &cfg.Dashboard)
 	stack.Register(func (sctx *node.ServiceContext) (node.Service, error) {
-		chainDb, err := eth.CreateRawDB(sctx, &cfg.Eth, "chaindata")
+		chainDb, err := sctx.OpenRawDatabaseWithFreezer("chaindata", cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, cfg.Eth.DatabaseFreezer, "eth/db/chaindata/")
 		if err != nil {
 			utils.Fatalf("Could not open database: %v", err)
 		}
@@ -180,7 +180,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 func replicaNodeConfig() node.Config {
 	cfg := nodeConfig
 	cfg.Name = "geth"
-	cfg.Version = params.VersionWithCommit(gitCommit)
+	cfg.Version = params.VersionWithCommit(gitCommit, gitDate)
 	cfg.HTTPModules = append(cfg.HTTPModules, "eth", "shh", "net")
 	cfg.WSModules = append(cfg.WSModules, "eth", "shh")
 	cfg.IPCPath = "geth.ipc"
