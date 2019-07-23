@@ -226,6 +226,19 @@ Use "ethereum sethead -2" to drop the two most recent blocks`,
      Description: `
 Verify proofs of the latest block state trie. Exit 0 if correct, else exit 1`,
 	}
+	compactCommand = cli.Command{
+     Action:    utils.MigrateFlags(compact),
+     Name:      "compactdb",
+     Usage:     "Compacts the database",
+     Flags: []cli.Flag{
+       utils.DataDirFlag,
+       utils.CacheFlag,
+       utils.SyncModeFlag,
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Compacts the database`,
+	}
 
 )
 
@@ -646,6 +659,15 @@ func verifyStateTrie(ctx *cli.Context) error {
   db.Close()
   // fmt.Printf("Rolled back chain to block %v\n", blockNumber)
   return nil
+}
+
+func compact(ctx *cli.Context) error {
+  stack := makeFullNode(ctx)
+  _, db := utils.MakeChain(ctx, stack)
+	start := time.Now()
+	err := db.Compact(nil, nil)
+	log.Info("Done", "time", time.Since(start))
+	return err
 }
 
 
