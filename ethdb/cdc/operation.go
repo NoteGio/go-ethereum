@@ -1,6 +1,7 @@
 package cdc
 
 import (
+  "bytes"
   "fmt"
   "encoding/binary"
   "github.com/ethereum/go-ethereum/ethdb"
@@ -8,7 +9,24 @@ import (
   "github.com/pborman/uuid"
   "errors"
   "time"
+  "sync"
 )
+
+type valueTracker struct {
+  currentMap map[string]struct{}
+  oldMap map[string]struct{}
+  m sync.Mutex
+  max int
+}
+
+func newValueTracker() *valueTracker {
+  return &valueTracker{
+    make(map[string]struct{}),
+    make(map[string]struct{}),
+    sync.Mutex{},
+    1000,
+  }
+}
 
 const (
   OpPut byte = 0
@@ -20,6 +38,11 @@ const (
   OpAppendAncient byte = 6
   OpTruncateAncients byte = 7
   OpSync byte = 8
+)
+
+var (
+  headerTracker = newValueTracker()
+  blockTracker = newValueTracker()
 )
 
 
@@ -56,6 +79,23 @@ type AncientData struct {
   Body []byte
   Receipt []byte
   Td []byte
+}
+
+func (t *valueTracker) add(v []byte) bool {
+  t.m.Lock()
+  defer t.m.Unlock()
+  sv := string(v)
+  if _, ok := t.currentMap[sv]; ok {
+    return false
+  }
+  if _, ok := t.oldMap[sv]; ok {
+    return false
+  }
+  t.currentMap[sv] = struct{}{}
+  if len(t.currentMap) >= t.max {
+    t.oldMap, t.currentMap = t.currentMap, make(map[string]struct{})
+  }
+  return true
 }
 
 func (op *BatchOperation) Bytes() ([]byte) {
@@ -99,9 +139,19 @@ func updateOffset(putter ethdb.KeyValueWriter, op *Operation) error {
 func (op *Operation) Apply(db ethdb.Database) error {
   switch op.Op {
   case OpPut:
-    batch := db.NewBatch()
     kv := &KeyValue{}
     if err := rlp.DecodeBytes(op.Data, kv); err != nil { return err }
+    if bytes.Equal(kv.Key, []byte("LastHeader")) && !headerTracker.add(kv.Value){
+      // We have already recorded this header. Recording it again could create
+      // inconsistencies.
+      return nil
+    }
+    if bytes.Equal(kv.Key, []byte("LastBlock")) && !blockTracker.add(kv.Value){
+      // We have already recorded this block. Recording it again could create
+      // inconsistencies.
+      return nil
+    }
+    batch := db.NewBatch()
     if err := batch.Put(kv.Key, kv.Value); err != nil { return err }
     if err := updateOffset(batch, op); err != nil { return err }
     if err := batch.Write(); err != nil { return err }
