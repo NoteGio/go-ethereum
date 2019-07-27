@@ -123,6 +123,10 @@ var (
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
 	}
+	OverlayFlag = DirectoryFlag{
+		Name:  "datadir.overlay",
+		Usage: "Data directory for overlay leveldb (default = none)",
+	}
 	KeyStoreDirFlag = DirectoryFlag{
 		Name:  "keystore",
 		Usage: "Directory for the keystore (default = inside the datadir)",
@@ -1540,6 +1544,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.DatabaseHandles = makeDatabaseHandles()
 	if ctx.GlobalIsSet(AncientFlag.Name) {
 		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
+	}
+	if ctx.GlobalIsSet(OverlayFlag.Name) {
+		cfg.DatabaseOverlay = ctx.GlobalString(OverlayFlag.Name)
 	}
 
 	if gcmode := ctx.GlobalString(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {

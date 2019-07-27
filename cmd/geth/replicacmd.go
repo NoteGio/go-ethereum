@@ -21,8 +21,13 @@ import (
 	"time"
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/eth"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/overlay"
+	"github.com/ethereum/go-ethereum/ethdb/devnull"
+	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	replicaModule "github.com/ethereum/go-ethereum/replica"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/params"
@@ -63,6 +68,8 @@ system and acts as an RPC node based on the replicated data.
 			utils.ReplicaStartupMaxAgeFlag,
 			utils.ReplicaRuntimeMaxOffsetAgeFlag,
 			utils.ReplicaRuntimeMaxBlockAgeFlag,
+			utils.OverlayFlag,
+			utils.AncientFlag,
 		},
 	}
 	replicaTxPoolConfig = core.TxPoolConfig{
@@ -160,6 +167,21 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 		chainDb, err := sctx.OpenRawDatabaseWithFreezer("chaindata", cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, cfg.Eth.DatabaseFreezer, "eth/db/chaindata/")
 		if err != nil {
 			utils.Fatalf("Could not open database: %v", err)
+		}
+		if cfg.Eth.DatabaseOverlay != "" {
+			var overlayDb ethdb.KeyValueStore
+			var err error
+			if cfg.Eth.DatabaseOverlay == "null" {
+				overlayDb = devnull.New()
+			} else if cfg.Eth.DatabaseOverlay == "mem" {
+				overlayDb = memorydb.New()
+			} else {
+				overlayDb, err = rawdb.NewLevelDBDatabase(cfg.Eth.DatabaseOverlay, cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, "eth/db/chaindata/overlay/")
+			}
+			if err != nil {
+				utils.Fatalf("Failed to create overlaydb", err)
+			}
+			chainDb = overlay.NewOverlayWrapperDB(overlayDb, chainDb, chainDb)
 		}
 	  return replicaModule.NewKafkaReplica(
 			chainDb,
