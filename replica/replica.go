@@ -101,10 +101,12 @@ func (r *Replica) Start(server *p2p.Server) error {
       now := time.Now().Unix()
       if r.maxBlockAge > 0 && now - int64(currentBlock.Time()) > r.maxBlockAge {
         log.Error("Max block age exceeded.", "maxAgeSec", r.maxBlockAge, "realAge", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)))
+        r.Stop()
         os.Exit(1)
       }
       if r.maxOffsetAge > 0 && now - offsetTimestamp > r.maxOffsetAge {
         log.Error("Max offset age exceeded.", "maxAgeSec", r.maxBlockAge, "realAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
+        r.Stop()
         os.Exit(1)
       }
       log.Info("Replica Sync", "num", currentBlock.Number(), "hash", currentBlock.Hash(), "blockAge", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)), "offset", offset, "offsetAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
@@ -113,6 +115,7 @@ func (r *Replica) Start(server *p2p.Server) error {
   return nil
 }
 func (r *Replica) Stop() error {
+  r.db.Close()
   return nil
 }
 
@@ -128,6 +131,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   log.Info("Replica up to date with master")
   if syncShutdown {
     log.Info("Replica shutdown after sync flag was set, shutting down")
+    db.Close()
     os.Exit(0)
   }
   chainConfig, _, _ := core.SetupGenesisBlock(db, config.Genesis)

@@ -9,19 +9,17 @@ import (
 	// "fmt"
 )
 
-func GetWrapperNoCache() (ethdb.Database, ethdb.Database, ethdb.Database) {
+func GetWrapperNoCache() (ethdb.KeyValueStore, ethdb.KeyValueStore, ethdb.KeyValueStore) {
 	overlay := rawdb.NewMemoryDatabase()
 	underlay := rawdb.NewMemoryDatabase()
-	freezer := rawdb.NewMemoryDatabase()
-	wrapper := &OverlayWrapperDB{overlay: overlay, underlay: underlay, freezer: freezer}
+	wrapper := &OverlayWrapperDB{overlay: overlay, underlay: underlay}
 	return wrapper, overlay, underlay
 }
-func GetWrapperWithCache() (ethdb.Database, ethdb.Database, ethdb.Database, ethdb.Database) {
+func GetWrapperWithCache() (ethdb.KeyValueStore, ethdb.KeyValueStore, ethdb.KeyValueStore, ethdb.KeyValueStore) {
 	overlay := rawdb.NewMemoryDatabase()
 	cache := rawdb.NewMemoryDatabase()
 	underlay := rawdb.NewMemoryDatabase()
-	freezer := rawdb.NewMemoryDatabase()
-	wrapper := &OverlayWrapperDB{overlay: overlay, cache: cache, underlay: underlay, freezer: freezer}
+	wrapper := &OverlayWrapperDB{overlay: overlay, cache: cache, underlay: underlay}
 	return wrapper, overlay, cache, underlay
 }
 
@@ -137,7 +135,7 @@ func TestIterator(t *testing.T) {
 	underlay.Put([]byte("e"), []byte("E"))
 	wrapper2.Delete([]byte("e"))
 
-	for _, db := range([]ethdb.Database{wrapper, wrapper2}) {
+	for _, db := range([]ethdb.KeyValueStore{wrapper, wrapper2}) {
 		defer wrapper.Close()
 		iter := db.NewIterator()
 

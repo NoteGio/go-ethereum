@@ -40,6 +40,7 @@ const (
   OpAppendAncient byte = 6
   OpTruncateAncients byte = 7
   OpSync byte = 8
+  MinBlockAge = 80 * time.Millisecond
 )
 
 var (
@@ -48,7 +49,7 @@ var (
   lastBlockUpdate = time.Now()
   lastBlockOffset int64
   lastBlockWrites int64
-  lastLog = time.Now()
+  lastLog = time.Time{}
   blocksSinceLastLog = 0
   applyTime = time.Since(time.Now())
   betweenTime = time.Since(time.Now())
@@ -180,6 +181,10 @@ func (op *Operation) Apply(db ethdb.Database) error {
       batch := db.NewBatch()
       if err := batch.Put(kv.Key, kv.Value); err != nil { return err }
       if err := updateOffset(batch, op); err != nil { return err }
+      // To help ensure consistency across replicas, don't apply this operation
+      // until MinBlockAge (80ms) after it was emitted by the master. If this
+      // number is <= 0, it will not pause.
+      time.Sleep(MinBlockAge - time.Since(op.Timestamp))
       if err := batch.Write(); err != nil { return err }
     } else {
       if err := db.Put(kv.Key, kv.Value); err != nil { return err }

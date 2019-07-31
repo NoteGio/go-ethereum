@@ -18,6 +18,7 @@ package main
 
 import (
 	// "fmt"
+	"path/filepath"
 	"time"
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/core"
@@ -33,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/dashboard"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	whisper "github.com/ethereum/go-ethereum/whisper/whisperv6"
@@ -164,24 +166,42 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	utils.SetShhConfig(ctx, stack, &cfg.Shh)
 	utils.SetDashboardConfig(ctx, &cfg.Dashboard)
 	stack.Register(func (sctx *node.ServiceContext) (node.Service, error) {
-		chainDb, err := sctx.OpenRawDatabaseWithFreezer("chaindata", cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, cfg.Eth.DatabaseFreezer, "eth/db/chaindata/")
+		log.Info("Opening leveldb")
+		var chainKv ethdb.KeyValueStore
+		var err error
+		chainKv, err = rawdb.NewLevelDBDatabase(sctx.ResolvePath("chaindata"), cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, "eth/db/chaindata")
+		// chainKv, err := sctx.OpenRawDatabaseWithFreezer("chaindata", cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, cfg.Eth.DatabaseFreezer, "eth/db/chaindata/")
 		if err != nil {
 			utils.Fatalf("Could not open database: %v", err)
 		}
+		log.Info("Opening overlay folder: %v", cfg.Eth.DatabaseOverlay)
 		if cfg.Eth.DatabaseOverlay != "" {
-			var overlayDb ethdb.KeyValueStore
+			var overlayKv ethdb.KeyValueStore
 			var err error
 			if cfg.Eth.DatabaseOverlay == "null" {
-				overlayDb = devnull.New()
+				overlayKv = devnull.New()
 			} else if cfg.Eth.DatabaseOverlay == "mem" {
-				overlayDb = memorydb.New()
+				overlayKv = memorydb.New()
 			} else {
-				overlayDb, err = rawdb.NewLevelDBDatabase(cfg.Eth.DatabaseOverlay, cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, "eth/db/chaindata/overlay/")
+				overlayKv, err = rawdb.NewLevelDBDatabase(cfg.Eth.DatabaseOverlay, cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, "eth/db/chaindata/overlay/")
 			}
 			if err != nil {
 				utils.Fatalf("Failed to create overlaydb", err)
 			}
-			chainDb = overlay.NewOverlayWrapperDB(overlayDb, chainDb, chainDb)
+			log.Info("Constructing Overlay")
+			chainKv = overlay.NewOverlayWrapperDB(overlayKv, chainKv)
+		}
+		root := sctx.ResolvePath("chaindata")
+		freezer := cfg.Eth.DatabaseFreezer
+		switch {
+		case freezer == "":
+			freezer = filepath.Join(root, "ancient")
+		case !filepath.IsAbs(freezer):
+			freezer = sctx.ResolvePath(freezer)
+		}
+		chainDb, err := rawdb.NewDatabaseWithFreezer(chainKv, freezer, "eth/db/chaindata")
+		if err != nil {
+			utils.Fatalf("Could not open freezer: %v", err)
 		}
 	  return replicaModule.NewKafkaReplica(
 			chainDb,

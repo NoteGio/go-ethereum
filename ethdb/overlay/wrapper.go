@@ -17,15 +17,14 @@ type OverlayWrapperDB struct {
   overlay ethdb.KeyValueStore
   cache ethdb.KeyValueStore
   underlay ethdb.KeyValueStore
-  freezer ethdb.AncientStore
 }
 
-func NewOverlayWrapperDB(overlay, underlay ethdb.KeyValueStore, freezer ethdb.AncientStore) ethdb.Database {
-  return &OverlayWrapperDB{overlay, nil, underlay, freezer}
+func NewOverlayWrapperDB(overlay, underlay ethdb.KeyValueStore) ethdb.KeyValueStore {
+  return &OverlayWrapperDB{overlay, nil, underlay}
 }
 
-func NewCachedOverlayWrapperDB(overlay, cache, underlay ethdb.KeyValueStore, freezer ethdb.AncientStore) ethdb.Database {
-  return &OverlayWrapperDB{overlay, cache, underlay, freezer}
+func NewCachedOverlayWrapperDB(overlay, cache, underlay ethdb.KeyValueStore) ethdb.KeyValueStore {
+  return &OverlayWrapperDB{overlay, cache, underlay}
 }
 
 func deleted(key []byte) ([]byte) {
@@ -62,7 +61,7 @@ func (wrapper *OverlayWrapperDB) Get(key []byte) ([]byte, error) {
     }
     val, err := wrapper.underlay.Get(key)
     if err == nil && wrapper.cache != nil {
-      go wrapper.cache.Put(key, val)
+      wrapper.cache.Put(key, val)
     }
     return val, err
   }
@@ -96,39 +95,16 @@ func (wrapper *OverlayWrapperDB) Compact(start []byte, limit []byte) error {
   return wrapper.overlay.Compact(start, limit)
 }
 
-func (wrapper *OverlayWrapperDB) HasAncient(kind string, number uint64) (bool, error) {
-  return wrapper.freezer.HasAncient(kind, number)
-}
-func (wrapper *OverlayWrapperDB) Ancient(kind string, number uint64) ([]byte, error) {
-  return wrapper.freezer.Ancient(kind, number)
-}
-func (wrapper *OverlayWrapperDB) Ancients() (uint64, error) {
-  return wrapper.freezer.Ancients()
-}
-func (wrapper *OverlayWrapperDB) AncientSize(kind string) (uint64, error) {
-  return wrapper.freezer.AncientSize(kind)
-}
-func (wrapper *OverlayWrapperDB) AppendAncient(number uint64, hash, header, body, receipt, td []byte) error {
-  return wrapper.freezer.AppendAncient(number, hash, header, body, receipt, td)
-}
-func (wrapper *OverlayWrapperDB) TruncateAncients(n uint64) error {
-  return wrapper.freezer.TruncateAncients(n)
-}
-func (wrapper *OverlayWrapperDB) Sync() error {
-  return wrapper.freezer.Sync()
-}
 func (wrapper *OverlayWrapperDB) Close() error {
   err1 := wrapper.overlay.Close()
   err2 := wrapper.underlay.Close()
-  err3 := wrapper.freezer.Close()
-  var err4 error
+  var err3 error
   if wrapper.cache != nil {
-    err4 = wrapper.cache.Close()
+    err3 = wrapper.cache.Close()
   }
   if err1 != nil { return err1 }
   if err2 != nil { return err2 }
-  if err3 != nil { return err3 }
-  return err4
+  return err3
 }
 func (wrapper *OverlayWrapperDB) NewBatch() ethdb.Batch {
   return &Batch{wrapper.overlay.NewBatch()}
