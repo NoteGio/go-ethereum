@@ -4,6 +4,7 @@ import (
   "context"
   "encoding/binary"
   "errors"
+  "fmt"
   "math/big"
   "github.com/ethereum/go-ethereum/eth/downloader"
   "github.com/ethereum/go-ethereum/eth/gasprice"
@@ -21,6 +22,7 @@ import (
   "github.com/ethereum/go-ethereum/core/state"
   "github.com/ethereum/go-ethereum/core/rawdb"
   "github.com/ethereum/go-ethereum/params"
+  "github.com/ethereum/go-ethereum/log"
   "time"
 )
 
@@ -37,6 +39,12 @@ type ReplicaBackend struct {
   shutdownChan chan bool
   accountManager *accounts.Manager
   gpo *gasprice.Oracle
+  blockHeads <-chan []byte
+  logsFeed event.Feed
+  removedLogsFeed event.Feed
+  chainFeed event.Feed
+  chainHeadFeed event.Feed
+  chainSideFeed event.Feed
 }
 
 	// General Ethereum API
@@ -145,34 +153,22 @@ func (backend *ReplicaBackend) GetLogs(ctx context.Context, blockHash common.Has
 }
 
 func (backend *ReplicaBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
-  return event.NewSubscription(func(<-chan struct{}) error {
-    return nil
-  })
-  // return backend.bc.SubscribeLogsEvent(ch)
+  return backend.logsFeed.Subscribe(ch)
 }
 
 func (backend *ReplicaBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
-  return event.NewSubscription(func(<-chan struct{}) error {
-    return nil
-  })
-  // return backend.bc.SubscribeRemovedLogsEvent(ch)
+  return backend.removedLogsFeed.Subscribe(ch)
 }
 
 	// I Don't think these are really need for RPC calls. Maybe stub them out?
 func (backend *ReplicaBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
-  return event.NewSubscription(func(<-chan struct{}) error {
-    return nil
-  })
+  return backend.chainFeed.Subscribe(ch)
 }
 func (backend *ReplicaBackend) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription {
-  return event.NewSubscription(func(<-chan struct{}) error {
-    return nil
-  })
+  return backend.chainHeadFeed.Subscribe(ch)
 }
 func (backend *ReplicaBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription {
-  return event.NewSubscription(func(<-chan struct{}) error {
-    return nil
-  })
+  return backend.chainSideFeed.Subscribe(ch)
 }
 
 	// TxPool API
@@ -294,8 +290,76 @@ func (backend *ReplicaBackend) GetTransaction(ctx context.Context, txHash common
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(backend.db, txHash)
 	return tx, blockHash, blockNumber, index, nil
 }
+
+func (backend *ReplicaBackend) handleBlockUpdates() {
+  var lastBlock *types.Block
+  for head := range backend.blockHeads {
+    headHash := common.BytesToHash(head)
+    headBlock := backend.bc.GetBlockByHash(headHash)
+    _, revertedBlocks, newBlocks, err := backend.findCommonAncestor(headBlock, lastBlock)
+    if err != nil {
+      log.Warn("Error finding common ancestor", "head", headHash, "old", lastBlock.Hash(), "err", err.Error())
+    }
+    for _, block := range revertedBlocks {
+      logs, err := backend.GetLogs(context.Background(), block.Hash())
+      if err != nil {
+        log.Warn("Error getting reverted logs", "block", block.Hash(), "err", err.Error())
+      }
+      allLogs := []*types.Log{}
+      for _, deletedLogs := range logs {
+        allLogs = append(allLogs, deletedLogs...)
+      }
+      if len(allLogs) > 0 {
+        backend.removedLogsFeed.Send(core.RemovedLogsEvent{allLogs})
+      }
+      backend.chainSideFeed.Send(core.ChainSideEvent{Block: block})
+    }
+    for _, block := range newBlocks {
+      logs, err := backend.GetLogs(context.Background(), block.Hash())
+      if err != nil {
+        log.Warn("Error getting logs", "block", block.Hash(), "err", err.Error())
+      }
+      allLogs := []*types.Log{}
+      for _, newLogs := range logs {
+        allLogs = append(allLogs, newLogs...)
+      }
+      if len(allLogs) > 0 {
+        backend.logsFeed.Send(allLogs)
+      }
+      backend.chainFeed.Send(core.ChainEvent{block, block.Hash(), allLogs})
+      backend.chainHeadFeed.Send(core.ChainHeadEvent{block})
+    }
+  }
+}
+
+func (backend *ReplicaBackend) findCommonAncestor(newHead, oldHead *types.Block) (*types.Block, types.Blocks, types.Blocks, error) {
+  reverted := types.Blocks{}
+  newBlocks := types.Blocks{newHead}
+  if oldHead == nil {
+    return nil, reverted, newBlocks, nil
+  }
+  for {
+    for newHead.NumberU64() > oldHead.NumberU64() + 1 {
+      parentHash := newHead.ParentHash()
+      newHead = backend.bc.GetBlockByHash(parentHash)
+      if newHead == nil {
+        return newHead, reverted, newBlocks, fmt.Errorf("Block %#x missing from database", parentHash)
+      }
+      newBlocks = append(types.Blocks{newHead}, newBlocks...)
+    }
+    if(oldHead.Hash() == newHead.ParentHash())  {
+      return oldHead, reverted, newBlocks, nil
+    }
+    reverted = append(types.Blocks{oldHead}, reverted...)
+    oldHead = backend.bc.GetBlockByHash(oldHead.ParentHash())
+    if oldHead.Hash() == backend.bc.Genesis().Hash() {
+      return oldHead, reverted, newBlocks, fmt.Errorf("Reached genesis without finding common ancestor")
+    }
+  }
+}
+
 func NewTestReplicaBackend(db ethdb.Database, hc *core.HeaderChain, bc *core.BlockChain, tp TransactionProducer) (*ReplicaBackend) {
-  return &ReplicaBackend{
+  backend := &ReplicaBackend{
     db: db,
     indexDb: rawdb.NewTable(db, string(rawdb.BloomBitsIndexPrefix)),
     hc: hc,
@@ -305,4 +369,6 @@ func NewTestReplicaBackend(db ethdb.Database, hc *core.HeaderChain, bc *core.Blo
     eventMux: new(event.TypeMux),
     shutdownChan: make(chan bool),
   }
+  go backend.handleBlockUpdates()
+  return backend
 }

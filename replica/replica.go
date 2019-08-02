@@ -12,6 +12,7 @@ import (
   "github.com/ethereum/go-ethereum/ethdb"
   "github.com/ethereum/go-ethereum/ethdb/cdc"
   "github.com/ethereum/go-ethereum/event"
+  "github.com/ethereum/go-ethereum/graphql"
   "github.com/ethereum/go-ethereum/node"
   "github.com/ethereum/go-ethereum/core"
   "github.com/ethereum/go-ethereum/core/vm"
@@ -37,41 +38,52 @@ type Replica struct {
   topic string
   maxOffsetAge int64
   maxBlockAge  int64
+  headChan chan []byte
+  backend *ReplicaBackend
+  graphql *graphql.Service
 }
 
 func (r *Replica) Protocols() []p2p.Protocol {
   return []p2p.Protocol{}
 }
-func (r *Replica) APIs() []rpc.API {
-  backend := &ReplicaBackend{
-    db: r.db,
-    indexDb: rawdb.NewTable(r.db, string(rawdb.BloomBitsIndexPrefix)),
-    hc: r.hc,
-    chainConfig: r.chainConfig,
-    bc: r.bc,
-    transactionProducer: r.transactionProducer,
-    eventMux: new(event.TypeMux),
-    shutdownChan: r.shutdownChan,
+
+func (r *Replica) GetBackend() *ReplicaBackend {
+  if r.backend == nil {
+    r.backend = &ReplicaBackend{
+      db: r.db,
+      indexDb: rawdb.NewTable(r.db, string(rawdb.BloomBitsIndexPrefix)),
+      hc: r.hc,
+      chainConfig: r.chainConfig,
+      bc: r.bc,
+      transactionProducer: r.transactionProducer,
+      eventMux: new(event.TypeMux),
+      shutdownChan: r.shutdownChan,
+      blockHeads: r.headChan,
+    }
   }
-  return append(ethapi.GetAPIs(backend),
-  rpc.API{
-    Namespace: "eth",
-    Version:   "1.0",
-    Service:   filters.NewPublicFilterAPI(backend, false),
-    Public:    true,
-  },
-  rpc.API{
-    Namespace: "net",
-    Version:   "1.0",
-    Service:   NewReplicaNetAPI(backend),
-    Public:    true,
-  },
-  rpc.API{
-    Namespace: "eth",
-    Version:   "1.0",
-    Service:   NewPublicEthereumAPI(backend),
-    Public:    true,
-  },
+  return r.backend
+}
+
+func (r *Replica) APIs() []rpc.API {
+  return append(ethapi.GetAPIs(r.GetBackend()),
+    rpc.API{
+      Namespace: "eth",
+      Version:   "1.0",
+      Service:   filters.NewPublicFilterAPI(r.GetBackend(), false),
+      Public:    true,
+    },
+    rpc.API{
+      Namespace: "net",
+      Version:   "1.0",
+      Service:   NewReplicaNetAPI(r.GetBackend()),
+      Public:    true,
+    },
+    rpc.API{
+      Namespace: "eth",
+      Version:   "1.0",
+      Service:   NewPublicEthereumAPI(r.GetBackend()),
+      Public:    true,
+    },
   )
 }
 func (r *Replica) Start(server *p2p.Server) error {
@@ -112,17 +124,25 @@ func (r *Replica) Start(server *p2p.Server) error {
       log.Info("Replica Sync", "num", currentBlock.Number(), "hash", currentBlock.Hash(), "blockAge", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)), "offset", offset, "offsetAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
     }
   }()
-  return nil
+  return r.graphql.Start(server)
 }
 func (r *Replica) Stop() error {
   r.db.Close()
+  r.graphql.Stop()
   return nil
 }
 
-func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64) (*Replica, error) {
+func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts) (*Replica, error) {
+  var headChan chan []byte
   go func() {
     for operation := range consumer.Messages() {
-      operation.Apply(db)
+      head, err := operation.Apply(db)
+      if err != nil {
+        log.Warn("Error applying operation", "err", err.Error())
+      }
+      if head != nil && headChan != nil {
+        headChan <- head
+      }
     }
   }()
   if ready := consumer.Ready(); ready != nil {
@@ -151,10 +171,16 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
     }
     log.Info("Block time is current. Starting replica.")
   }
-  return &Replica{db, hc, chainConfig, bc, transactionProducer, make(chan bool), consumer.TopicName(), maxOffsetAge, maxBlockAge}, nil
+  headChan = make(chan []byte, 10)
+  replica := &Replica{db, hc, chainConfig, bc, transactionProducer, make(chan bool), consumer.TopicName(), maxOffsetAge, maxBlockAge, headChan, nil, nil}
+  // endpoint string, cors, vhosts []string, timeouts rpc.HTTPTimeouts
+  if graphqlEnabled {
+    replica.graphql, err = graphql.New(replica.GetBackend(), graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
+  }
+  return replica, err
 }
 
-func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker []string, kafkaTopic, transactionTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64) (*Replica, error) {
+func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker []string, kafkaTopic, transactionTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts) (*Replica, error) {
   topicParts := strings.Split(kafkaTopic, ":")
   kafkaTopic = topicParts[0]
   var offset int64
@@ -192,5 +218,5 @@ func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceCon
   if err != nil {
     return nil, err
   }
-  return NewReplica(db, config, ctx, transactionProducer, consumer, syncShutdown, startupAge, offsetAge, blockAge)
+  return NewReplica(db, config, ctx, transactionProducer, consumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
 }

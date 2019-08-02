@@ -67,6 +67,15 @@ system and acts as an RPC node based on the replicated data.
 			utils.RPCPortFlag,
 			utils.RPCListenAddrFlag,
 			utils.RPCCORSDomainFlag,
+			utils.WSEnabledFlag,
+			utils.WSListenAddrFlag,
+			utils.WSPortFlag,
+			utils.WSAllowedOriginsFlag,
+			utils.GraphQLEnabledFlag,
+			utils.GraphQLListenAddrFlag,
+			utils.GraphQLPortFlag,
+			utils.GraphQLCORSDomainFlag,
+			utils.GraphQLVirtualHostsFlag,
 			utils.ReplicaStartupMaxAgeFlag,
 			utils.ReplicaRuntimeMaxOffsetAgeFlag,
 			utils.ReplicaRuntimeMaxBlockAgeFlag,
@@ -214,6 +223,11 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 			ctx.GlobalInt64(utils.ReplicaStartupMaxAgeFlag.Name),
 			ctx.GlobalInt64(utils.ReplicaRuntimeMaxOffsetAgeFlag.Name),
 			ctx.GlobalInt64(utils.ReplicaRuntimeMaxBlockAgeFlag.Name),
+			ctx.GlobalBool(utils.GraphQLEnabledFlag.Name),
+			cfg.Node.GraphQLEndpoint(),
+			cfg.Node.GraphQLCors,
+			cfg.Node.GraphQLVirtualHosts,
+			cfg.Node.HTTPTimeouts,
 		)
 	})
 	return stack, cfg
