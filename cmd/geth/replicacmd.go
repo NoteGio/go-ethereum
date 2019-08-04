@@ -183,8 +183,8 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 		if err != nil {
 			utils.Fatalf("Could not open database: %v", err)
 		}
-		log.Info("Opening overlay folder: %v", cfg.Eth.DatabaseOverlay)
 		if cfg.Eth.DatabaseOverlay != "" {
+			log.Info("Opening overlay folder", "path", cfg.Eth.DatabaseOverlay)
 			var overlayKv ethdb.KeyValueStore
 			var err error
 			if cfg.Eth.DatabaseOverlay == "null" {

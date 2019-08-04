@@ -45,6 +45,7 @@ type ReplicaBackend struct {
   chainFeed event.Feed
   chainHeadFeed event.Feed
   chainSideFeed event.Feed
+  newTxsFeed    event.Feed
 }
 
 	// General Ethereum API
@@ -265,10 +266,8 @@ func (backend *ReplicaBackend) TxPoolContent() (map[common.Address]types.Transac
 }
 
 	// Not sure how to stub out subscriptions
-func (backend *ReplicaBackend) SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription {
-  return event.NewSubscription(func(<-chan struct{}) error {
-    return nil
-  })
+func (backend *ReplicaBackend) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
+  return backend.newTxsFeed.Subscribe(ch)
 }
 
 func (backend *ReplicaBackend) ChainConfig() *params.ChainConfig {
@@ -369,6 +368,5 @@ func NewTestReplicaBackend(db ethdb.Database, hc *core.HeaderChain, bc *core.Blo
     eventMux: new(event.TypeMux),
     shutdownChan: make(chan bool),
   }
-  go backend.handleBlockUpdates()
   return backend
 }

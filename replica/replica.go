@@ -60,6 +60,7 @@ func (r *Replica) GetBackend() *ReplicaBackend {
       shutdownChan: r.shutdownChan,
       blockHeads: r.headChan,
     }
+    go r.backend.handleBlockUpdates()
   }
   return r.backend
 }
