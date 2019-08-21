@@ -109,6 +109,10 @@ func (backend *ReplicaBackend) BlockByNumber(ctx context.Context, blockNr rpc.Bl
 	}
 	return backend.bc.GetBlockByNumber(uint64(blockNr)), nil
 }
+func (backend *ReplicaBackend) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
+  return backend.bc.GetBlockByHash(hash), nil
+}
+
 	// For StateAndHeaderByNumber, we'll need to construct a core.state object from
 	// the state root for the specified block and the chaindb.
 func (backend *ReplicaBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.StateDB, *types.Header, error) {
