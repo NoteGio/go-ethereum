@@ -178,7 +178,6 @@ func (backend *ReplicaBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideE
 
 	// TxPool API
 
-	// Perhaps we can put these on a Kafka queue back to the full node?
 func (backend *ReplicaBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
   if backend.transactionProducer == nil {
     return errors.New("This api is not configured for accepting transactions")
@@ -251,7 +250,10 @@ func (backend *ReplicaBackend) GetPoolTransaction(txHash common.Hash) *types.Tra
 	// Generate core.state.managed_state object from current state, and get nonce from that
 	// It won't account for have pending transactions
 func (backend *ReplicaBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
-  return 0, nil
+  state, _, err := backend.StateAndHeaderByNumber(ctx, rpc.LatestBlockNumber)
+  if err != nil {return 0, err}
+  nonce := state.GetNonce(addr)
+  return nonce, state.Error()
 }
 
 	// 0,0
