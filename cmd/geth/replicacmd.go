@@ -17,7 +17,8 @@
 package main
 
 import (
-	// "fmt"
+	"fmt"
+	"database/sql"
 	"path/filepath"
 	"time"
 	"math/big"
@@ -188,6 +189,17 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 		if err != nil {
 			utils.Fatalf("Could not open database: %v", err)
 		}
+		logsdb, err := sql.Open("sqlite3", fmt.Sprintf("file:%v?_sync=0", sctx.ResolvePath("logs.db")))
+		if err != nil {
+			log.Warn("Log database not found. Falling back to leveldb logs.", "error", err.Error())
+		} else {
+
+			_, err = logsdb.Exec("SELECT 1 FROM event_logs;")
+			if err != nil {
+				log.Warn("Log database not well formed. Falling back to leveldb logs.", "error", err.Error())
+				logsdb = nil
+			}
+		}
 		if cfg.Eth.DatabaseOverlay != "" {
 			log.Info("Opening overlay folder", "path", cfg.Eth.DatabaseOverlay)
 			var overlayKv ethdb.KeyValueStore
@@ -233,6 +245,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 			cfg.Node.GraphQLCors,
 			cfg.Node.GraphQLVirtualHosts,
 			cfg.Node.HTTPTimeouts,
+			logsdb,
 		)
 	})
 	return stack, cfg

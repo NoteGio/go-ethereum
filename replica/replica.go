@@ -3,6 +3,7 @@ package replica
 import (
   "errors"
   "encoding/binary"
+  "database/sql"
   "github.com/ethereum/go-ethereum/p2p"
   "github.com/ethereum/go-ethereum/rpc"
   // "github.com/ethereum/go-ethereum/node"
@@ -41,6 +42,7 @@ type Replica struct {
   headChan chan []byte
   backend *ReplicaBackend
   graphql *graphql.Service
+  logdb *sql.DB
 }
 
 func (r *Replica) Protocols() []p2p.Protocol {
@@ -59,6 +61,7 @@ func (r *Replica) GetBackend() *ReplicaBackend {
       eventMux: new(event.TypeMux),
       shutdownChan: r.shutdownChan,
       blockHeads: r.headChan,
+      logdb: r.logdb,
     }
     go r.backend.handleBlockUpdates()
   }
@@ -66,7 +69,7 @@ func (r *Replica) GetBackend() *ReplicaBackend {
 }
 
 func (r *Replica) APIs() []rpc.API {
-  return append(ethapi.GetAPIs(r.GetBackend()),
+  apis := append(ethapi.GetAPIs(r.GetBackend()),
     rpc.API{
       Namespace: "eth",
       Version:   "1.0",
@@ -86,6 +89,15 @@ func (r *Replica) APIs() []rpc.API {
       Public:    true,
     },
   )
+  if r.logdb != nil {
+    apis = append(apis, rpc.API{
+      Namespace: "eth",
+      Version: "1.0",
+      Service: &logApi{r.GetBackend(), r.logdb},
+      Public: true,
+    })
+  }
+  return apis
 }
 func (r *Replica) Start(server *p2p.Server) error {
   go func() {
@@ -125,16 +137,48 @@ func (r *Replica) Start(server *p2p.Server) error {
       log.Info("Replica Sync", "num", currentBlock.Number(), "hash", currentBlock.Hash(), "blockAge", common.PrettyAge(time.Unix(int64(currentBlock.Time()), 0)), "offset", offset, "offsetAge", common.PrettyAge(time.Unix(offsetTimestamp, 0)))
     }
   }()
-  return r.graphql.Start(server)
+  if r.graphql != nil {
+    return r.graphql.Start(server)
+  }
+  return nil
 }
 func (r *Replica) Stop() error {
   r.db.Close()
-  r.graphql.Stop()
+  if r.graphql != nil {
+    r.graphql.Stop()
+  }
   return nil
 }
 
-func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts) (*Replica, error) {
-  var headChan chan []byte
+func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, logdb *sql.DB) (*Replica, error) {
+  chainConfig, _, _ := core.SetupGenesisBlockWithOverride(db, config.Genesis, config.OverrideIstanbul)
+  engine := eth.CreateConsensusEngine(ctx, chainConfig, &config.Ethash, []string{}, true, db)
+  hc, err := core.NewHeaderChain(db, chainConfig, engine, func() bool { return false })
+  if err != nil {
+    return nil, err
+  }
+  bc, err := core.NewBlockChain(db, &core.CacheConfig{}, chainConfig, engine, vm.Config{}, nil)
+  if err != nil {
+    return nil, err
+  }
+  headChan := make(chan []byte, 10)
+  replica := &Replica{db, hc, chainConfig, bc, transactionProducer, make(chan bool), consumer.TopicName(), maxOffsetAge, maxBlockAge, headChan, nil, nil, logdb}
+  ldbBlock := replica.GetBackend().CurrentBlock()
+  rows, err := logdb.Query("SELECT value FROM int_kv WHERE key = ?;", "blockNumber")
+  if err != nil {
+    return nil, err
+  }
+  defer rows.Close()
+  rows.Next()
+  var sqliteBlockNumber int64
+  err = rows.Scan(&sqliteBlockNumber)
+  if err != nil {
+    return nil, err
+  }
+  if ldbBlock.Number().Int64() > sqliteBlockNumber {
+    return nil, fmt.Errorf("sqlite lags behind leveldb")
+  }
+
   go func() {
     for operation := range consumer.Messages() {
       head, err := operation.Apply(db)
@@ -155,16 +199,6 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
     db.Close()
     os.Exit(0)
   }
-  chainConfig, _, _ := core.SetupGenesisBlockWithOverride(db, config.Genesis, config.OverrideIstanbul)
-  engine := eth.CreateConsensusEngine(ctx, chainConfig, &config.Ethash, []string{}, true, db)
-  hc, err := core.NewHeaderChain(db, chainConfig, engine, func() bool { return false })
-  if err != nil {
-    return nil, err
-  }
-  bc, err := core.NewBlockChain(db, &core.CacheConfig{}, chainConfig, engine, vm.Config{}, nil)
-  if err != nil {
-    return nil, err
-  }
   if startupAge > 0 {
     log.Info("Waiting for current block time")
     for time.Now().Unix() - startupAge > int64(bc.GetBlockByHash(rawdb.ReadHeadBlockHash(db)).Time()) {
@@ -172,8 +206,6 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
     }
     log.Info("Block time is current. Starting replica.")
   }
-  headChan = make(chan []byte, 10)
-  replica := &Replica{db, hc, chainConfig, bc, transactionProducer, make(chan bool), consumer.TopicName(), maxOffsetAge, maxBlockAge, headChan, nil, nil}
   // endpoint string, cors, vhosts []string, timeouts rpc.HTTPTimeouts
   if graphqlEnabled {
     replica.graphql, err = graphql.New(replica.GetBackend(), graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
@@ -181,7 +213,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   return replica, err
 }
 
-func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker []string, kafkaTopic, transactionTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts) (*Replica, error) {
+func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker []string, kafkaTopic, transactionTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, logdb *sql.DB) (*Replica, error) {
   topicParts := strings.Split(kafkaTopic, ":")
   kafkaTopic = topicParts[0]
   var offset int64
@@ -219,5 +251,5 @@ func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceCon
   if err != nil {
     return nil, err
   }
-  return NewReplica(db, config, ctx, transactionProducer, consumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
+  return NewReplica(db, config, ctx, transactionProducer, consumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout, logdb)
 }

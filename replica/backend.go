@@ -2,6 +2,7 @@ package replica
 
 import (
   "context"
+  "database/sql"
   "encoding/binary"
   "errors"
   "fmt"
@@ -46,6 +47,7 @@ type ReplicaBackend struct {
   chainHeadFeed event.Feed
   chainSideFeed event.Feed
   newTxsFeed    event.Feed
+  logdb         *sql.DB
 }
 
 	// General Ethereum API
@@ -298,6 +300,7 @@ func (backend *ReplicaBackend) GetTransaction(ctx context.Context, txHash common
 
 func (backend *ReplicaBackend) handleBlockUpdates() {
   var lastBlock *types.Block
+  var logtx *sql.Tx
   for head := range backend.blockHeads {
     headHash := common.BytesToHash(head)
     headBlock := backend.bc.GetBlockByHash(headHash)
@@ -306,6 +309,10 @@ func (backend *ReplicaBackend) handleBlockUpdates() {
       log.Warn("Error finding common ancestor", "head", headHash, "old", lastBlock.Hash(), "err", err.Error())
     }
     for _, block := range revertedBlocks {
+      if backend.logdb != nil {
+        logtx, err = backend.logdb.BeginTx(context.Background(), nil)
+        log.Warn("Error creating sql transaction for log deletion", "err", err.Error())
+      }
       logs, err := backend.GetLogs(context.Background(), block.Hash())
       if err != nil {
         log.Warn("Error getting reverted logs", "block", block.Hash(), "err", err.Error())
@@ -314,12 +321,27 @@ func (backend *ReplicaBackend) handleBlockUpdates() {
       for _, deletedLogs := range logs {
         allLogs = append(allLogs, deletedLogs...)
       }
+      if logtx != nil {
+        for _, logRecord := range allLogs {
+          _, err = logtx.Exec(`DELETE FROM event_logs WHERE blockHash = ? AND logIndex = ?`, logRecord.BlockHash, logRecord.Index)
+          if err != nil {
+            log.Warn("Error adding log deletion to transaction", "err", err.Error())
+          }
+        }
+        if err := logtx.Commit(); err != nil {
+          log.Warn("Error committing log transaction", err.Error())
+        }
+      }
       if len(allLogs) > 0 {
         backend.removedLogsFeed.Send(core.RemovedLogsEvent{allLogs})
       }
       backend.chainSideFeed.Send(core.ChainSideEvent{Block: block})
     }
     for _, block := range newBlocks {
+      if backend.logdb != nil {
+        logtx, err = backend.logdb.BeginTx(context.Background(), nil)
+        log.Warn("Error creating sql transaction for log indexing", "err", err.Error())
+      }
       logs, err := backend.GetLogs(context.Background(), block.Hash())
       if err != nil {
         log.Warn("Error getting logs", "block", block.Hash(), "err", err.Error())
@@ -327,6 +349,35 @@ func (backend *ReplicaBackend) handleBlockUpdates() {
       allLogs := []*types.Log{}
       for _, newLogs := range logs {
         allLogs = append(allLogs, newLogs...)
+      }
+      if logtx != nil {
+        for _, logRecord := range allLogs {
+          _, err = logtx.Exec(
+            "INSERT OR IGNORE INTO event_logs(address, topic0, topic1, topic2, topic3, topic4, blockNumber, transactionHash, transactionIndex, blockHash, logIndex) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            trimPrefix(logRecord.Address.Bytes()),
+            trimPrefix(getTopicIndex(logRecord.Topics, 0)),
+            trimPrefix(getTopicIndex(logRecord.Topics, 1)),
+            trimPrefix(getTopicIndex(logRecord.Topics, 2)),
+            trimPrefix(getTopicIndex(logRecord.Topics, 3)),
+            trimPrefix(getTopicIndex(logRecord.Topics, 4)),
+            logRecord.BlockNumber,
+            trimPrefix(logRecord.TxHash.Bytes()),
+            logRecord.TxIndex,
+            trimPrefix(logRecord.BlockHash.Bytes()),
+            logRecord.Index,
+          )
+
+          if err != nil {
+            log.Warn("Error adding log to transaction", "err", err.Error())
+          }
+        }
+        _, err = logtx.Exec("UPDATE int_kv SET value = ? WHERE key = ?", block.Number().Int64(), "blockNumber" )
+        if err != nil {
+          log.Warn("Error blockNumber update to transaction", "err", err.Error())
+        }
+        if err := logtx.Commit(); err != nil {
+          log.Warn("Error committing log transaction", err.Error())
+        }
       }
       if len(allLogs) > 0 {
         backend.logsFeed.Send(allLogs)
