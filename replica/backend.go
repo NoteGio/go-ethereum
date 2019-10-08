@@ -139,7 +139,12 @@ func (backend *ReplicaBackend) GetTd(blockHash common.Hash) *big.Int {
 	// Use core.NewEVMContext and vm.NewEVM - Will need custom ChainContext implementation
 func (backend *ReplicaBackend) GetEVM(ctx context.Context, msg core.Message, state *state.StateDB, header *types.Header) (*vm.EVM, func() error, error) {
   state.SetBalance(msg.From(), math.MaxBig256)
-  vmError := func() error { return ctx.Err() }
+  vmError := func() error {
+    if err := state.Error(); err != nil {
+      return err
+    }
+    return ctx.Err()
+  }
 
   context := core.NewEVMContext(msg, header, backend.bc, nil)
   return vm.NewEVM(context, state, backend.chainConfig, *backend.bc.GetVMConfig()), vmError, nil
@@ -263,7 +268,7 @@ func (backend *ReplicaBackend) Stats() (pending int, queued int) {
 
 func (backend *ReplicaBackend) RPCGasCap() *big.Int {
   // TODO: Make configurable
-  return big.NewInt(32000000)
+  return big.NewInt(128000000)
 }
 
 	// Return empty maps

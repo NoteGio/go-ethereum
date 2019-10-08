@@ -804,7 +804,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNr rpc.BlockNumb
 		}
 	}
 	// Set default gas & gas price if none were set
-	gas := uint64(math.MaxUint64 / 2)
+	gas := globalGasCap.Uint64()
 	if args.Gas != nil {
 		gas = uint64(*args.Gas)
 	}
@@ -857,7 +857,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNr rpc.BlockNumb
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
-	res, gas, failed, err := core.ApplyMessage(evm, msg, gp)
+	res, usedGas, failed, err := core.ApplyMessage(evm, msg, gp)
 	if err := vmError(); err != nil {
 		return nil, 0, false, err
 	}
@@ -865,7 +865,10 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNr rpc.BlockNumb
 	if evm.Cancelled() {
 		return nil, 0, false, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 	}
-	return res, gas, failed, err
+	if failed && usedGas >= gas {
+		return res, usedGas, failed, fmt.Errorf("out of gas")
+	}
+	return res, usedGas, failed, err
 }
 
 // Call executes the given transaction on the state for the given block number.
@@ -879,7 +882,14 @@ func (s *PublicBlockChainAPI) Call(ctx context.Context, args CallArgs, blockNr r
 	if overrides != nil {
 		accounts = *overrides
 	}
-	result, _, _, err := DoCall(ctx, s.b, args, blockNr, accounts, vm.Config{}, 5*time.Second, s.b.RPCGasCap())
+	var timeout time.Duration
+	if args.Gas != nil {
+		timeout = time.Duration(*args.Gas / 10000000) * time.Second
+	}
+	if timeout < 5 * time.Second {
+		timeout = 5 * time.Second
+	}
+	result, _, _, err := DoCall(ctx, s.b, args, blockNr, accounts, vm.Config{}, timeout, s.b.RPCGasCap())
 	return (hexutil.Bytes)(result), err
 }
 
