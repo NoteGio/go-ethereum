@@ -16,6 +16,11 @@
 
 package main
 
+// import (
+// 	_ "net/http/pprof" // TODO: Disable this
+// 	"net/http"
+// )
+
 import (
 	// "fmt"
 	"path/filepath"
@@ -80,6 +85,8 @@ system and acts as an RPC node based on the replicated data.
 			utils.ReplicaStartupMaxAgeFlag,
 			utils.ReplicaRuntimeMaxOffsetAgeFlag,
 			utils.ReplicaRuntimeMaxBlockAgeFlag,
+			utils.ReplicaEVMConcurrencyFlag,
+			utils.ReplicaWarmAddressesFlag,
 			utils.OverlayFlag,
 			utils.AncientFlag,
 			utils.OverrideIstanbulFlag,
@@ -145,6 +152,9 @@ system and acts as an RPC node based on the replicated data.
 )
 // replica starts replica node
 func replica(ctx *cli.Context) error {
+	// go func() {
+	// 	log.Info("Serving", "err", http.ListenAndServe("0.0.0.0:6060", nil))
+	// }()
 	node, _ := makeReplicaNode(ctx)
 	utils.StartNode(node)
 	node.Wait()
@@ -240,6 +250,8 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 			cfg.Node.GraphQLCors,
 			cfg.Node.GraphQLVirtualHosts,
 			cfg.Node.HTTPTimeouts,
+			int(ctx.GlobalInt64(utils.ReplicaEVMConcurrencyFlag.Name)),
+			ctx.GlobalString(utils.ReplicaWarmAddressesFlag.Name),
 		)
 	})
 	return stack, cfg

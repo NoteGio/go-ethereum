@@ -158,6 +158,8 @@ var (
 		utils.ReplicaStartupMaxAgeFlag,
 		utils.ReplicaRuntimeMaxOffsetAgeFlag,
 		utils.ReplicaRuntimeMaxBlockAgeFlag,
+		utils.ReplicaEVMConcurrencyFlag,
+		utils.ReplicaWarmAddressesFlag,
 	}
 
 	rpcFlags = []cli.Flag{

@@ -3,6 +3,7 @@ package replica
 import (
   "errors"
   "encoding/binary"
+  "encoding/json"
   "github.com/ethereum/go-ethereum/p2p"
   "github.com/ethereum/go-ethereum/rpc"
   // "github.com/ethereum/go-ethereum/node"
@@ -26,6 +27,7 @@ import (
   "strings"
   "strconv"
   "os"
+  "io/ioutil"
 )
 
 type Replica struct {
@@ -41,6 +43,8 @@ type Replica struct {
   headChan chan []byte
   backend *ReplicaBackend
   graphql *graphql.Service
+  evmConcurrency int
+  warmAddressFile string
 }
 
 func (r *Replica) Protocols() []p2p.Protocol {
@@ -49,6 +53,10 @@ func (r *Replica) Protocols() []p2p.Protocol {
 
 func (r *Replica) GetBackend() *ReplicaBackend {
   if r.backend == nil {
+    var evmSemaphore chan struct{}
+    if r.evmConcurrency > 0 {
+      evmSemaphore = make(chan struct{}, r.evmConcurrency)
+    }
     r.backend = &ReplicaBackend{
       db: r.db,
       indexDb: rawdb.NewTable(r.db, string(rawdb.BloomBitsIndexPrefix)),
@@ -59,8 +67,27 @@ func (r *Replica) GetBackend() *ReplicaBackend {
       eventMux: new(event.TypeMux),
       shutdownChan: r.shutdownChan,
       blockHeads: r.headChan,
+      evmSemaphore: evmSemaphore,
     }
     go r.backend.handleBlockUpdates()
+    if r.warmAddressFile != "" {
+      jsonFile, err := os.Open(r.warmAddressFile)
+      if err != nil {
+        log.Warn("Error warming addresses: %v", "error", err)
+      } else {
+        addressJSONBytes, _ := ioutil.ReadAll(jsonFile)
+        addresses := []common.Address{}
+        if err := json.Unmarshal(addressJSONBytes, &addresses); err != nil {
+          log.Warn("Error warming addresses: %v", "error", err)
+        }
+        log.Info("Warming addresses", "count", len(addresses))
+        if err := r.backend.warmAddresses(addresses); err != nil {
+          log.Warn("Error warming addresses: %v", "error", err)
+        }
+      }
+    } else {
+      log.Info("No address file. Not warming")
+    }
   }
   return r.backend
 }
@@ -133,7 +160,7 @@ func (r *Replica) Stop() error {
   return nil
 }
 
-func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts) (*Replica, error) {
+func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, evmConcurrency int, warmAddressFile string) (*Replica, error) {
   var headChan chan []byte
   go func() {
     for operation := range consumer.Messages() {
@@ -173,7 +200,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
     log.Info("Block time is current. Starting replica.")
   }
   headChan = make(chan []byte, 10)
-  replica := &Replica{db, hc, chainConfig, bc, transactionProducer, make(chan bool), consumer.TopicName(), maxOffsetAge, maxBlockAge, headChan, nil, nil}
+  replica := &Replica{db, hc, chainConfig, bc, transactionProducer, make(chan bool), consumer.TopicName(), maxOffsetAge, maxBlockAge, headChan, nil, nil, evmConcurrency, warmAddressFile}
   // endpoint string, cors, vhosts []string, timeouts rpc.HTTPTimeouts
   if graphqlEnabled {
     replica.graphql, err = graphql.New(replica.GetBackend(), graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
@@ -181,7 +208,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   return replica, err
 }
 
-func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker, kafkaTopic, transactionTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts) (*Replica, error) {
+func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker, kafkaTopic, transactionTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, evmConcurrency int, warmAddressFile string) (*Replica, error) {
   topicParts := strings.Split(kafkaTopic, ":")
   kafkaTopic = topicParts[0]
   var offset int64
@@ -219,5 +246,5 @@ func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceCon
   if err != nil {
     return nil, err
   }
-  return NewReplica(db, config, ctx, transactionProducer, consumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
+  return NewReplica(db, config, ctx, transactionProducer, consumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout, evmConcurrency, warmAddressFile)
 }

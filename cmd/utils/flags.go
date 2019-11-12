@@ -746,6 +746,15 @@ var (
 		 Usage: "If the replica's current block is older than this number of seconds, shut down.",
 		 Value: 0,
 	}
+	ReplicaEVMConcurrencyFlag = cli.Int64Flag{
+		 Name: "replica.evm.concurrency",
+		 Usage: "How many EVM instances may run in parallel",
+		 Value: 0,
+	}
+	ReplicaWarmAddressesFlag = cli.StringFlag{
+		 Name: "replica.warm.addresses",
+		 Usage: "A file containing a JSON list of addresses to warm before running the replica",
+	}
 
 
 	// Metrics flags
