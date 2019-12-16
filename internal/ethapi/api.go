@@ -859,6 +859,19 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, blockNrOrHash rpc.Blo
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
+
+	// If this is a call on the pending block and a caller is specified, apply any
+	// transactions from the specified caller before running the call.
+	if *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber && args.From != nil {
+		pending, queued := b.TxPoolContent()
+		signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number())
+		for _, tx := range append(pending[*args.From], queued[*args.From]...) {
+			m, err := tx.AsMessage(signer)
+			if err == nil {
+				core.ApplyMessage(evm, m, gp)
+			}
+		}
+	}
 	res, usedGas, failed, err := core.ApplyMessage(evm, msg, gp)
 	if err := vmError(); err != nil {
 		return nil, 0, false, err
