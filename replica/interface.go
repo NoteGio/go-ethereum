@@ -20,6 +20,7 @@ type EventConsumer interface {
   SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription
   SubscribeOffsets(ch chan<- int64) event.Subscription
   Start()
+  Ready() chan struct{}
 }
 
 type TransactionProducer interface {

@@ -184,7 +184,7 @@ func (consumer *KafkaEventConsumer) processEvent(msgType byte, msg []byte) error
       }
     }
     emptyHash := common.Hash{}
-    if event.Block.Hash() == consumer.lastEmittedBlock {
+    if event.Hash == consumer.lastEmittedBlock {
       // Given multiple masters, we'll see blocks repeat
       return nil
     }
@@ -199,7 +199,7 @@ func (consumer *KafkaEventConsumer) processEvent(msgType byte, msg []byte) error
       }
       revertBlocks, newBlocks, err := findCommonAncestor(event, lastEmittedEvent, []map[common.Hash]*core.ChainEvent{consumer.currentMap, consumer.oldMap})
       if err != nil {
-        log.Error("Error finding common ancestor", "newBlock", event.Block.Hash(), "oldBlock", consumer.lastEmittedBlock, "error", err)
+        log.Error("Error finding common ancestor", "newBlock", event.Hash, "oldBlock", consumer.lastEmittedBlock, "error", err)
         return err
       }
       if len(newBlocks) > 0 {
