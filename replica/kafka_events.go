@@ -104,6 +104,7 @@ type KafkaEventConsumer struct {
   chainFeed event.Feed
   chainHeadFeed event.Feed
   chainSideFeed event.Feed
+  offsetFeed event.Feed
   consumer sarama.PartitionConsumer
   oldMap map[common.Hash]*core.ChainEvent
   currentMap map[common.Hash]*core.ChainEvent
@@ -126,6 +127,9 @@ func (consumer *KafkaEventConsumer) SubscribeChainHeadEvent(ch chan<- core.Chain
 }
 func (consumer *KafkaEventConsumer) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription {
   return consumer.chainSideFeed.Subscribe(ch)
+}
+func (consumer *KafkaEventConsumer) SubscribeOffsets(ch chan<- int64) event.Subscription {
+  return consumer.offsetFeed.Subscribe(ch)
 }
 
 func (consumer *KafkaEventConsumer) processEvent(msgType byte, msg []byte) error {
@@ -235,6 +239,9 @@ func (consumer *KafkaEventConsumer) Start() {
       msg := input.Value[1:]
       if err := consumer.processEvent(msgType, msg); err != nil {
         log.Error("Error processing input:", "err", err, "msgType", msgType, "msg", msg, "offset", input.Offset)
+      }
+      if msgType == EmitMsg {
+        consumer.offsetFeed.Send(input.Offset)
       }
     }
   }()

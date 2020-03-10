@@ -18,6 +18,7 @@ type EventConsumer interface {
   SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription
   SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
   SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription
+  SubscribeOffsets(ch chan<- int64) event.Subscription
   Start()
 }
 
