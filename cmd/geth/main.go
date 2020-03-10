@@ -156,6 +156,7 @@ var (
 		configFileFlag,
 		utils.KafkaLogBrokerFlag,
 		utils.KafkaLogTopicFlag,
+		utils.KafkaEventTopicFlag,
 		utils.KafkaTransactionPoolTopicFlag,
 		utils.KafkaTransactionTopicFlag,
 		utils.KafkaTransactionConsumerGroupFlag,
@@ -485,12 +486,12 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 				log.Info("Pool topic missing")
 			}
 			if eventTopic := ctx.GlobalString(utils.KafkaEventTopicFlag.Name); eventTopic != "" {
-				producer, err := replicaModule.NewKafkaEventProducerFromURLS(brokerURL, eventTopic)
+				producer, err := replicaModule.NewKafkaEventProducerFromURLs(brokerURL, eventTopic)
 				if err != nil {
 					utils.Fatalf("Failed to create event producer for %v - %v", brokerURL, eventTopic)
 				}
 				log.Info("Starting Kafka event producer relay", "broker", brokerURL, "topic", eventTopic)
-				producer.RelayEvents(ethereum.BlockChain)	
+				producer.RelayEvents(ethereum.BlockChain())
 			}
 		} else {
 			log.Info("Broker url missing")
