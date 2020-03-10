@@ -215,6 +215,10 @@ func (consumer *KafkaEventConsumer) processEvent(msgType byte, msg []byte) error
   return nil
 }
 
+func (consumer *KafkaEventConsumer) Ready() chan struct{} {
+  return consumer.ready
+}
+
 func (consumer *KafkaEventConsumer) Start() {
   inputChannel := consumer.consumer.Messages()
   go func() {
@@ -286,4 +290,32 @@ func (consumer *KafkaEventConsumer) Emit(add []core.ChainEvent, remove []core.Ch
     consumer.chainFeed.Send(newEvent)
     consumer.lastEmittedBlock = newEvent.Hash
   }
+}
+
+func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock common.Hash, offset int64) (EventConsumer, error) {
+  brokers, config := cdc.ParseKafkaURL(brokerURL)
+  if err := cdc.CreateTopicIfDoesNotExist(brokerURL, topic, 1, nil); err != nil {
+    return nil, err
+  }
+  config.Version = sarama.V2_1_0_0
+  client, err := sarama.NewClient(brokers, config)
+  if err != nil {
+    return nil, err
+  }
+  consumer, err := sarama.NewConsumerFromClient(client)
+  if err != nil {
+    return nil, err
+  }
+  partitionConsumer, err := consumer.ConsumePartition(topic, 0, offset)
+  if err != nil {
+    return nil, err
+  }
+  return &KafkaEventConsumer{
+    recoverySize: 128,
+    consumer: partitionConsumer,
+    oldMap: make(map[common.Hash]*core.ChainEvent),
+    currentMap: make(map[common.Hash]*core.ChainEvent),
+    ready: make(chan struct{}),
+    lastEmittedBlock: common.Hash{},
+  }, nil
 }
