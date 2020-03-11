@@ -148,6 +148,25 @@ func updateOffset(putter ethdb.KeyValueWriter, op *Operation) error {
   }
   return nil
 }
+
+func logAndSleep(value []byte, timestamp time.Time, offset int64) {
+  if time.Since(lastLog) > 1 * time.Second {
+    log.Info("Recording LastBlock", "hash", common.BytesToHash(value), "delta", time.Since(timestamp), "lastBlock", time.Since(lastBlockUpdate), "offset", offset, "offsetDelta", offset - lastBlockOffset, "writes", lastBlockWrites, "blocks", blocksSinceLastLog, "applyTime", applyTime, "betweenTime", betweenTime)
+    applyTime = time.Since(time.Now())
+    betweenTime = time.Since(time.Now())
+    blocksSinceLastLog = 0
+    lastLog = time.Now()
+  }
+  blocksSinceLastLog++
+  lastBlockUpdate = time.Now()
+  lastBlockOffset = offset
+  lastBlockWrites = 1
+  // To help ensure consistency across replicas, don't apply this operation
+  // until MinBlockAge (80ms) after it was emitted by the master. If this
+  // number is <= 0, it will not pause.
+  time.Sleep(MinBlockAge - time.Since(timestamp))
+}
+
 func (op *Operation) Apply(db ethdb.Database) ([]byte, error) {
   betweenTime += time.Since(lastApply)
   applyStart := time.Now()
@@ -167,24 +186,10 @@ func (op *Operation) Apply(db ethdb.Database) ([]byte, error) {
       return nil, nil
     }
     if bytes.Equal(kv.Key, []byte("LastBlock")) {
-      if time.Since(lastLog) > 1 * time.Second {
-        log.Info("Recording LastBlock", "hash", common.BytesToHash(kv.Value), "delta", time.Since(op.Timestamp), "lastBlock", time.Since(lastBlockUpdate), "offset", op.Offset, "offsetDelta", op.Offset - lastBlockOffset, "writes", lastBlockWrites, "blocks", blocksSinceLastLog, "applyTime", applyTime, "betweenTime", betweenTime)
-        applyTime = time.Since(time.Now())
-        betweenTime = time.Since(time.Now())
-        blocksSinceLastLog = 0
-        lastLog = time.Now()
-      }
-      blocksSinceLastLog++
-      lastBlockUpdate = time.Now()
-      lastBlockOffset = op.Offset
-      lastBlockWrites = 1
+      logAndSleep(kv.Value, op.Timestamp, op.Offset)
       batch := db.NewBatch()
       if err := batch.Put(kv.Key, kv.Value); err != nil { return nil, err }
       if err := updateOffset(batch, op); err != nil { return nil, err }
-      // To help ensure consistency across replicas, don't apply this operation
-      // until MinBlockAge (80ms) after it was emitted by the master. If this
-      // number is <= 0, it will not pause.
-      time.Sleep(MinBlockAge - time.Since(op.Timestamp))
       if err := batch.Write(); err != nil { return nil, err }
       return kv.Value, nil
     }
@@ -206,11 +211,28 @@ func (op *Operation) Apply(db ethdb.Database) ([]byte, error) {
     batch := db.NewBatch()
     var operations []BatchOperation
     if err := rlp.DecodeBytes(op.Data[16:], &operations); err != nil { return nil, err }
+    var headHash []byte
     for _, bop := range operations {
       switch bop.Op {
       case OpPut:
         kv := &KeyValue{}
         if err := rlp.DecodeBytes(bop.Data, kv); err != nil { return nil, err }
+
+        if bytes.Equal(kv.Key, []byte("LastHeader")) && !headerTracker.add(kv.Value){
+          // We have already recorded this header. Recording it again could create
+          // inconsistencies.
+          continue
+        }
+        if bytes.Equal(kv.Key, []byte("LastBlock")) && !blockTracker.add(kv.Value){
+          // We have already recorded this block. Recording it again could create
+          // inconsistencies.
+          continue
+        }
+        if bytes.Equal(kv.Key, []byte("LastBlock")) {
+          logAndSleep(kv.Value, op.Timestamp, op.Offset)
+          if err := batch.Put(kv.Key, kv.Value); err != nil { return nil, err }
+          headHash = kv.Value
+        }
         if err := batch.Put(kv.Key, kv.Value); err != nil { return nil, err }
       case OpDelete:
         if err := batch.Delete(bop.Data); err != nil { return nil, err }
@@ -219,7 +241,7 @@ func (op *Operation) Apply(db ethdb.Database) ([]byte, error) {
       }
 
     }
-    if err := batch.Write(); err != nil { return nil, err }
+    if err := batch.Write(); err != nil { return headHash, err }
   case OpHeartbeat:
     return nil, updateOffset(db, op)
   default:
