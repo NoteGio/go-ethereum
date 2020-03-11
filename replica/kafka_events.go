@@ -71,7 +71,9 @@ func (producer *KafkaEventProducer) RelayEvents(bc ChainEventSubscriber) {
   subscription := bc.SubscribeChainEvent(ceCh)
   go func() {
     for ce := range ceCh {
-      producer.Emit(ce)
+      if err := producer.Emit(ce); err != nil {
+        log.Error("Failed to produce event log: %v", err.Error())
+      }
     }
     log.Warn("Event emitter shutting down")
     subscription.Unsubscribe()
@@ -169,7 +171,7 @@ func (consumer *KafkaEventConsumer) processEvent(msgType byte, msg []byte) error
       // and this implementation should be O(n*log(n))
       if l.Index == logRecord.Index {
         // Log is already in the list, don't add it again
-        continue
+        return nil
       }
     }
     consumer.currentMap[logRecord.BlockHash].Logs = append(consumer.currentMap[logRecord.BlockHash].Logs, logRecord)
@@ -193,7 +195,7 @@ func (consumer *KafkaEventConsumer) processEvent(msgType byte, msg []byte) error
       consumer.Emit([]core.ChainEvent{*event}, []core.ChainEvent{})
     } else {
       lastEmittedEvent := consumer.currentMap[consumer.lastEmittedBlock]
-      if event.Block.Number().Cmp(lastEmittedEvent.Block.Number()) == 0 {
+      if event.Block.Number().Cmp(lastEmittedEvent.Block.Number()) <= 0 {
         // Don't emit reorgs until there's a new block
         return nil
       }
@@ -318,7 +320,7 @@ func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock com
     return nil, err
   }
   return &KafkaEventConsumer{
-    recoverySize: 128,
+    recoverySize: 128, // Geth keeps 128 generations of state trie to handle reorgs, we'll keep at least 128 blocks in memory to be able to handle reorgs.
     consumer: partitionConsumer,
     oldMap: make(map[common.Hash]*core.ChainEvent),
     currentMap: make(map[common.Hash]*core.ChainEvent),
