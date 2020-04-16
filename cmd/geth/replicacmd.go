@@ -61,7 +61,7 @@ The Geth replica captures a Geth node's write operations via a change-data-captu
 system and acts as an RPC node based on the replicated data.
 `,
 		Flags: []cli.Flag{
-			utils.TestnetFlag,
+			utils.RopstenFlag,
 			utils.RinkebyFlag,
 			utils.GoerliFlag,
 			utils.KafkaLogBrokerFlag,
