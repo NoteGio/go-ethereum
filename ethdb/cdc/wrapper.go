@@ -212,22 +212,10 @@ func (db *DBWrapper) NewBatch() ethdb.Batch {
 
 // NewIterator creates a binary-alphabetical iterator over the entire keyspace
 // contained within the key-value database.
-func (db *DBWrapper) NewIterator() ethdb.Iterator {
-  return db.db.NewIterator()
+func (db *DBWrapper) NewIterator(start, end []byte) ethdb.Iterator {
+  return db.db.NewIterator(start, end)
 }
 
-// NewIteratorWithStart creates a binary-alphabetical iterator over a subset of
-// database content starting at a particular initial key (or after, if it does
-// not exist).
-func (db *DBWrapper) NewIteratorWithStart(start []byte) ethdb.Iterator {
-  return db.db.NewIteratorWithStart(start)
-}
-
-// NewIteratorWithPrefix creates a binary-alphabetical iterator over a subset
-// of database content with a particular key prefix.
-func (db *DBWrapper) NewIteratorWithPrefix(prefix []byte) ethdb.Iterator {
-  return db.db.NewIteratorWithPrefix(prefix)
-}
 
 func NewDBWrapper(db ethdb.Database, writeStream, readStream LogProducer) ethdb.Database {
   return &DBWrapper{db, writeStream, readStream}

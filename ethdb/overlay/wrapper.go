@@ -140,9 +140,9 @@ func (wrapper *OverlayWrapperDB) Close() error {
 func (wrapper *OverlayWrapperDB) NewBatch() ethdb.Batch {
   return &Batch{wrapper.overlay.NewBatch()}
 }
-func (wrapper *OverlayWrapperDB) NewIterator() ethdb.Iterator {
-  oiterator := wrapper.overlay.NewIterator()
-  uiterator := wrapper.underlay.NewIterator()
+func (wrapper *OverlayWrapperDB) NewIterator(start, end []byte) ethdb.Iterator {
+  oiterator := wrapper.overlay.NewIterator(start, end)
+  uiterator := wrapper.underlay.NewIterator(start, end)
   oiterator.Next()
   uiterator.Next()
   return &WrappedIterator{
@@ -150,30 +150,6 @@ func (wrapper *OverlayWrapperDB) NewIterator() ethdb.Iterator {
     oiterator,
     false,
     uiterator,
-    false,
-    nil,
-    []byte{},
-    []byte{},
-  }
-}
-func (wrapper *OverlayWrapperDB) NewIteratorWithPrefix(prefix []byte) ethdb.Iterator {
-  return &WrappedIterator{
-    wrapper,
-    wrapper.overlay.NewIteratorWithPrefix(prefix),
-    false,
-    wrapper.underlay.NewIteratorWithPrefix(prefix),
-    false,
-    nil,
-    []byte{},
-    []byte{},
-  }
-}
-func (wrapper *OverlayWrapperDB) NewIteratorWithStart(start []byte) ethdb.Iterator {
-  return &WrappedIterator{
-    wrapper,
-    wrapper.overlay.NewIteratorWithStart(start),
-    false,
-    wrapper.underlay.NewIteratorWithStart(start),
     false,
     nil,
     []byte{},
