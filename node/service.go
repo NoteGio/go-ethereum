@@ -33,10 +33,10 @@ import (
 // the protocol stack, that is passed to all constructors to be optionally used;
 // as well as utility methods to operate on the service environment.
 type ServiceContext struct {
-	config         *Config
 	services       map[reflect.Type]Service // Index of the already constructed services
-	EventMux       *event.TypeMux           // Event multiplexer used for decoupled notifications
-	AccountManager *accounts.Manager        // Account manager created by the node.
+	Config         Config
+	EventMux       *event.TypeMux    // Event multiplexer used for decoupled notifications
+	AccountManager *accounts.Manager // Account manager created by the node.
 }
 
 // OpenDatabase opens an existing database with the given name (or creates one
@@ -45,14 +45,14 @@ type ServiceContext struct {
 func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, namespace string) (ethdb.Database, error) {
 	var db ethdb.Database
 	var err error
-	if ctx.config.DataDir == "" {
+	if ctx.Config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
-		db, err = rawdb.NewLevelDBDatabase(ctx.config.ResolvePath(name), cache, handles, namespace)
-		if ctx.config.KafkaLogBroker != "" {
+		db, err = rawdb.NewLevelDBDatabase(ctx.Config.ResolvePath(name), cache, handles, namespace)
+		if ctx.Config.KafkaLogBroker != "" {
 	   producer, err := cdc.NewKafkaLogProducerFromURL(
-	           ctx.config.KafkaLogBroker,
-	           ctx.config.KafkaLogTopic,
+	           ctx.Config.KafkaLogBroker,
+	           ctx.Config.KafkaLogTopic,
 	   )
 	   if err != nil { return nil, err }
 	   // TODO: Add options for a readStream
@@ -70,10 +70,10 @@ func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, nam
 // write operations will be sent to Kafka.
 func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
 	db, err := ctx.OpenRawDatabaseWithFreezer(name, cache, handles, freezer, namespace)
-	if ctx.config.KafkaLogBroker != "" {
+	if ctx.Config.KafkaLogBroker != "" {
    producer, err := cdc.NewKafkaLogProducerFromURL(
-           ctx.config.KafkaLogBroker,
-           ctx.config.KafkaLogTopic,
+           ctx.Config.KafkaLogBroker,
+           ctx.Config.KafkaLogTopic,
    )
    if err != nil { return nil, err }
    // TODO: Add options for a readStream
@@ -86,15 +86,16 @@ func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handl
 // OpenDatabaseWithFreezer, but it will never be wrapped to send write
 // operations to Kafka.
 func (ctx *ServiceContext) OpenRawDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
-	if ctx.config.DataDir == "" {
+	if ctx.Config.DataDir == "" {
 		return rawdb.NewMemoryDatabase(), nil
 	}
-	root := ctx.config.ResolvePath(name)
+	root := ctx.Config.ResolvePath(name)
+
 	switch {
 	case freezer == "":
 		freezer = filepath.Join(root, "ancient")
 	case !filepath.IsAbs(freezer):
-		freezer = ctx.config.ResolvePath(freezer)
+		freezer = ctx.Config.ResolvePath(freezer)
 	}
 	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
 }
@@ -103,7 +104,7 @@ func (ctx *ServiceContext) OpenRawDatabaseWithFreezer(name string, cache int, ha
 // and if the user actually uses persistent storage. It will return an empty string
 // for emphemeral storage and the user's own input for absolute paths.
 func (ctx *ServiceContext) ResolvePath(path string) string {
-	return ctx.config.ResolvePath(path)
+	return ctx.Config.ResolvePath(path)
 }
 
 // Service retrieves a currently running service registered of a specific type.
@@ -119,7 +120,7 @@ func (ctx *ServiceContext) Service(service interface{}) error {
 // ExtRPCEnabled returns the indicator whether node enables the external
 // RPC(http, ws or graphql).
 func (ctx *ServiceContext) ExtRPCEnabled() bool {
-	return ctx.config.ExtRPCEnabled()
+	return ctx.Config.ExtRPCEnabled()
 }
 
 // ServiceConstructor is the function signature of the constructors needed to be

@@ -2,15 +2,16 @@ package replica
 
 import (
   "github.com/Shopify/sarama"
-  // "log"
   "fmt"
   "github.com/ethereum/go-ethereum/common"
   "github.com/ethereum/go-ethereum/core"
+  "github.com/ethereum/go-ethereum/core/rawdb"
   "github.com/ethereum/go-ethereum/core/types"
   "github.com/ethereum/go-ethereum/event"
   "github.com/ethereum/go-ethereum/rlp"
   "github.com/ethereum/go-ethereum/log"
   "github.com/ethereum/go-ethereum/ethdb/cdc"
+  "github.com/ethereum/go-ethereum/ethdb"
   // "encoding/hex"
 )
 
@@ -20,10 +21,48 @@ const (
   EmitMsg = byte(2)
 )
 
+type chainEventProvider interface {
+  GetChainEvent(common.Hash, uint64) (core.ChainEvent, error)
+  GetBlock(common.Hash) (*types.Block, error)
+  GetHeadBlockHash() (common.Hash)
+}
+
+type dbChainEventProvider struct {
+  db ethdb.Database
+}
+
+func (cep *dbChainEventProvider) GetHeadBlockHash() common.Hash {
+  return rawdb.ReadHeadBlockHash(cep.db)
+}
+
+func (cep *dbChainEventProvider) GetBlock(h common.Hash) (*types.Block, error) {
+  n := *rawdb.ReadHeaderNumber(cep.db, h)
+  block := rawdb.ReadBlock(cep.db, h, n)
+  if block == nil { return nil, fmt.Errorf("Error retrieving block %#x", h)}
+  return block, nil
+}
+func (cep *dbChainEventProvider) GetChainEvent(h common.Hash, n uint64) (core.ChainEvent, error) {
+  block := rawdb.ReadBlock(cep.db, h, n)
+  if block == nil { return core.ChainEvent{}, fmt.Errorf("Block %#x missing from database", h)}
+  genesisHash := rawdb.ReadCanonicalHash(cep.db, 0)
+  chainConfig := rawdb.ReadChainConfig(cep.db, genesisHash)
+  receipts := rawdb.ReadReceipts(cep.db, h, n, chainConfig)
+  logs := []*types.Log{}
+  if receipts != nil {
+    // Receipts will be nil if the list is empty, so this is not an error condition
+    for _, receipt := range receipts {
+      logs = append(logs, receipt.Logs...)
+    }
+  }
+  return core.ChainEvent{Block: block, Hash: block.Hash(), Logs: logs}, nil
+}
+
+
 type KafkaEventProducer struct {
   producer sarama.SyncProducer
   topic string
   closed bool
+  cep chainEventProvider
 }
 
 func (producer *KafkaEventProducer) Close() {
@@ -66,13 +105,66 @@ type ChainEventSubscriber interface {
   SubscribeChainEvent(chan<- core.ChainEvent) event.Subscription
 }
 
+func (producer *KafkaEventProducer) ReprocessEvents(ceCh chan<- core.ChainEvent, n int) error {
+  hash := producer.cep.GetHeadBlockHash()
+  block, err := producer.cep.GetBlock(hash)
+  if err != nil { return err }
+  events := make([]core.ChainEvent, n)
+  events[n-1], err = producer.cep.GetChainEvent(block.Hash(), block.NumberU64())
+  if err != nil { return err }
+  for i := n - 1; i > 0 && events[i].Block.NumberU64() > 0; i-- {
+    events[i-1], err =  producer.cep.GetChainEvent(events[i].Block.ParentHash(), events[i].Block.NumberU64() - 1)
+    if err != nil { return err }
+  }
+  for _, ce := range events {
+    ceCh <- ce
+  }
+  return nil
+}
+
 func (producer *KafkaEventProducer) RelayEvents(bc ChainEventSubscriber) {
-  ceCh := make(chan core.ChainEvent, 100)
-  subscription := bc.SubscribeChainEvent(ceCh)
   go func() {
+    ceCh := make(chan core.ChainEvent, 100)
+    go producer.ReprocessEvents(ceCh, 10)
+    subscription := bc.SubscribeChainEvent(ceCh)
+    recentHashes := make(map[common.Hash]struct{})
+    olderHashes := make(map[common.Hash]struct{})
+    lastEmitted := common.Hash{}
+    setTest := func (k common.Hash) bool {
+      if _, ok := recentHashes[k]; ok { return true }
+      _, ok := olderHashes[k]
+      return ok
+    }
+    setAdd := func(k common.Hash) {
+      recentHashes[k] = struct{}{}
+      if len(recentHashes) > 128 {
+        olderHashes = recentHashes
+        recentHashes = make(map[common.Hash]struct{})
+      }
+      lastEmitted = k
+    }
+    first := true
     for ce := range ceCh {
-      if err := producer.Emit(ce); err != nil {
-        log.Error("Failed to produce event log: %v", err.Error())
+      if first || setTest(ce.Block.ParentHash()) {
+        if err := producer.Emit(ce); err != nil {
+          log.Error("Failed to produce event log: %v", err.Error())
+        }
+        setAdd(ce.Hash)
+        first = false
+      } else {
+        newBlocks, err := producer.getNewBlockAncestors(ce, lastEmitted)
+        if err != nil {
+          log.Error("Failed to find new block ancestors", "block", ce.Hash, "parent", ce.Block.ParentHash(), "le", lastEmitted, "error", err)
+          continue
+        }
+        for _, pce := range newBlocks {
+          if !setTest(pce.Hash) {
+            if err := producer.Emit(pce); err != nil {
+              log.Error("Failed to produce event log: %v", err.Error())
+            }
+            setAdd(pce.Hash)
+          }
+        }
       }
     }
     log.Warn("Event emitter shutting down")
@@ -80,9 +172,31 @@ func (producer *KafkaEventProducer) RelayEvents(bc ChainEventSubscriber) {
   }()
 }
 
-func NewKafkaEventProducerFromURLs(brokerURL, topic string) (EventProducer, error) {
+func (producer *KafkaEventProducer) getNewBlockAncestors(ce core.ChainEvent, h common.Hash) ([]core.ChainEvent, error) {
+  var err error
+  oldBlock, err := producer.cep.GetBlock(h)
+  if err != nil { return nil, err }
+  newBlocks := []core.ChainEvent{ce}
+  for {
+    if oldBlock.Hash() == ce.Hash {
+      // If we have a match, we're done, return them.
+      return newBlocks, nil
+    } else if ce.Block.NumberU64() <= oldBlock.NumberU64() {
+      // oldBlock has a higher or equal number, but the blocks aren't equal.
+      // Walk back the oldBlock
+      oldBlock, err = producer.cep.GetBlock(oldBlock.ParentHash())
+      if err != nil { return nil, err }
+    } else if ce.Block.NumberU64() > oldBlock.NumberU64() {
+      // the new block has a higher number, walk it back
+      ce, err = producer.cep.GetChainEvent(ce.Block.ParentHash(), ce.Block.NumberU64() - 1)
+      if err != nil { return nil, err }
+      newBlocks = append([]core.ChainEvent{ce}, newBlocks...)
+    }
+  }
+}
+
+func NewKafkaEventProducerFromURLs(brokerURL, topic string, db ethdb.Database) (EventProducer, error) {
   configEntries := make(map[string]*string)
-  configEntries["retention.ms"] = strPtr("3600000")
   brokers, config := cdc.ParseKafkaURL(brokerURL)
   if err := cdc.CreateTopicIfDoesNotExist(brokerURL, topic, 1, configEntries); err != nil {
     return nil, err
@@ -92,11 +206,11 @@ func NewKafkaEventProducerFromURLs(brokerURL, topic string) (EventProducer, erro
   if err != nil {
     return nil, err
   }
-  return NewKafkaEventProducer(producer, topic), nil
+  return NewKafkaEventProducer(producer, topic, &dbChainEventProvider{db}), nil
 }
 
-func NewKafkaEventProducer(producer sarama.SyncProducer, topic string) (EventProducer) {
-  return &KafkaEventProducer{producer, topic, false}
+func NewKafkaEventProducer(producer sarama.SyncProducer, topic string, cep chainEventProvider) (EventProducer) {
+  return &KafkaEventProducer{producer, topic, false, cep}
 }
 
 type KafkaEventConsumer struct {
@@ -107,6 +221,7 @@ type KafkaEventConsumer struct {
   chainHeadFeed event.Feed
   chainSideFeed event.Feed
   offsetFeed event.Feed
+  startingOffset int64
   consumer sarama.PartitionConsumer
   oldMap map[common.Hash]*core.ChainEvent
   currentMap map[common.Hash]*core.ChainEvent
@@ -130,7 +245,7 @@ func (consumer *KafkaEventConsumer) SubscribeChainHeadEvent(ch chan<- core.Chain
 func (consumer *KafkaEventConsumer) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription {
   return consumer.chainSideFeed.Subscribe(ch)
 }
-func (consumer *KafkaEventConsumer) SubscribeOffsets(ch chan<- int64) event.Subscription {
+func (consumer *KafkaEventConsumer) SubscribeOffsets(ch chan<- OffsetHash) event.Subscription {
   return consumer.offsetFeed.Subscribe(ch)
 }
 
@@ -225,6 +340,11 @@ func (consumer *KafkaEventConsumer) Ready() chan struct{} {
   return consumer.ready
 }
 
+type OffsetHash struct {
+  Offset int64
+  Hash common.Hash
+}
+
 func (consumer *KafkaEventConsumer) Start() {
   inputChannel := consumer.consumer.Messages()
   go func() {
@@ -239,11 +359,21 @@ func (consumer *KafkaEventConsumer) Start() {
       }
       msgType := input.Value[0]
       msg := input.Value[1:]
+      if msgType == EmitMsg && input.Offset < consumer.startingOffset {
+        // During the initial startup, we start several thousand or so messages
+        // before we actually want to resume to make sure we have the blocks in
+        // memory to handle a reorg. We don't want to re-emit these blocks, we
+        // just want to populate our caches.
+        continue
+      }
       if err := consumer.processEvent(msgType, msg); err != nil {
-        log.Error("Error processing input:", "err", err, "msgType", msgType, "msg", msg, "offset", input.Offset)
+        if input.Offset >= consumer.startingOffset {
+          // Don't bother logging errors if we haven't reached the starting offset.
+          log.Error("Error processing input:", "err", err, "msgType", msgType, "msg", msg, "offset", input.Offset)
+        }
       }
       if msgType == EmitMsg {
-        consumer.offsetFeed.Send(input.Offset)
+        consumer.offsetFeed.Send(OffsetHash{input.Offset, common.BytesToHash(msg)})
       }
     }
   }()
@@ -269,7 +399,7 @@ func findCommonAncestor(newHead, oldHead *core.ChainEvent, mappings []map[common
       parentHash := newHead.Block.ParentHash()
       newHead = getFromMappings(parentHash, mappings)
       if newHead == nil {
-        return reverted, newBlocks, fmt.Errorf("Block %#x missing from database", parentHash)
+        return reverted, newBlocks, fmt.Errorf("Block %#x missing from history", parentHash)
       }
       newBlocks = append([]core.ChainEvent{*newHead}, newBlocks...)
     }
@@ -315,9 +445,18 @@ func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock com
   if err != nil {
     return nil, err
   }
-  partitionConsumer, err := consumer.ConsumePartition(topic, 0, offset)
+  startOffset := offset
+  if startOffset > 5000 {
+    startOffset -= 5000
+  }
+  partitionConsumer, err := consumer.ConsumePartition(topic, 0, startOffset)
   if err != nil {
-    return nil, err
+    // We may not have been able to roll back 1000 messages, so just try with
+    // the provided offset
+    partitionConsumer, err = consumer.ConsumePartition(topic, 0, offset)
+    if err != nil {
+      return nil, err
+    }
   }
   return &KafkaEventConsumer{
     recoverySize: 128, // Geth keeps 128 generations of state trie to handle reorgs, we'll keep at least 128 blocks in memory to be able to handle reorgs.
@@ -326,5 +465,6 @@ func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock com
     currentMap: make(map[common.Hash]*core.ChainEvent),
     ready: make(chan struct{}),
     lastEmittedBlock: common.Hash{},
+    startingOffset: offset,
   }, nil
 }

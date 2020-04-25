@@ -1,6 +1,7 @@
 package cdc
 
 import (
+  "fmt"
   "github.com/Shopify/sarama"
   "github.com/ethereum/go-ethereum/log"
   "net/url"
@@ -111,6 +112,9 @@ func (producer *KafkaLogProducer) Emit(data []byte) error {
 }
 
 func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, configEntries map[string]*string) error {
+  if topic == "" {
+    return fmt.Errorf("Unspecified topic")
+  }
   if configEntries == nil {
     configEntries = make(map[string]*string)
   }

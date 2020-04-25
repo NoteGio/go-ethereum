@@ -133,6 +133,7 @@ var (
 		utils.NetrestrictFlag,
 		utils.NodeKeyFileFlag,
 		utils.NodeKeyHexFlag,
+		utils.DNSDiscoveryFlag,
 		utils.DeveloperFlag,
 		utils.DeveloperPeriodFlag,
 		utils.TestnetFlag,
@@ -208,7 +209,7 @@ func init() {
 	// Initialize the CLI app and start Geth
 	app.Action = geth
 	app.HideVersion = true // we have a command to print the version
-	app.Copyright = "Copyright 2013-2019 The go-ethereum Authors"
+	app.Copyright = "Copyright 2013-2020 The go-ethereum Authors"
 	app.Commands = []cli.Command{
 		// See chaincmd.go:
 		initCommand,
@@ -219,12 +220,14 @@ func init() {
 		copydbCommand,
 		removedbCommand,
 		dumpCommand,
+		dumpGenesisCommand,
 		inspectCommand,
 		setHeadCommand,
 		verifyStateTrieCommand,
 		compactCommand,
 		stateMigrateCommand,
 		repairMigrationCommand,
+		kafkaEventsCommand,
 		// See accountcmd.go:
 		accountCommand,
 		walletCommand,
@@ -256,7 +259,7 @@ func init() {
 	app.Flags = append(app.Flags, metricsFlags...)
 
 	app.Before = func(ctx *cli.Context) error {
-		return debug.Setup(ctx, "")
+		return debug.Setup(ctx)
 	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
@@ -459,7 +462,7 @@ func startNode(ctx *cli.Context, stack *node.Node) {
 				log.Info("Pool topic missing")
 			}
 			if eventTopic := ctx.GlobalString(utils.KafkaEventTopicFlag.Name); eventTopic != "" {
-				producer, err := replicaModule.NewKafkaEventProducerFromURLs(brokerURL, eventTopic)
+				producer, err := replicaModule.NewKafkaEventProducerFromURLs(brokerURL, eventTopic, ethereum.ChainDb())
 				if err != nil {
 					utils.Fatalf("Failed to create event producer for %v - %v", brokerURL, eventTopic)
 				}

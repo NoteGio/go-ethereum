@@ -45,6 +45,7 @@ type ReplicaBackend struct {
   gpo *gasprice.Oracle
   blockHeads <-chan []byte
   logsFeed event.Feed
+  pendingLogsFeed event.Feed
   removedLogsFeed event.Feed
   chainFeed event.Feed
   chainHeadFeed event.Feed
@@ -188,6 +189,10 @@ func (backend *ReplicaBackend) GetLogs(ctx context.Context, blockHash common.Has
 
 func (backend *ReplicaBackend) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
   return backend.logsFeed.Subscribe(ch)
+}
+
+func (backend *ReplicaBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
+  return backend.pendingLogsFeed.Subscribe(ch)
 }
 
 func (backend *ReplicaBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
@@ -346,7 +351,11 @@ func (backend *ReplicaBackend) Stats() (pending int, queued int) {
 
 func (backend *ReplicaBackend) RPCGasCap() *big.Int {
   // TODO: Make configurable
-  return big.NewInt(int64(math.MaxUint64 / 2))
+  header, err := backend.HeaderByNumber(context.Background(), rpc.LatestBlockNumber)
+  if err != nil {
+    return big.NewInt(int64(math.MaxUint64 / 2))
+  }
+  return big.NewInt(int64(header.GasLimit * 1000))
 }
 
 	// Return empty maps
@@ -498,7 +507,7 @@ func (backend *ReplicaBackend) consumeTransactions(transactionConsumer Transacti
     go func() {
       for tx := range transactionConsumer.Messages() {
         if err := backend.txPool.AddRemote(tx); err != nil && !strings.HasPrefix(err.Error(), "known transaction") {
-          log.Warn("Error adding tx to pool", "tx", tx.Hash(), "error", err)
+          log.Debug("Error adding tx to pool", "tx", tx.Hash(), "error", err)
         }
       }
       }()

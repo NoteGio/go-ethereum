@@ -25,8 +25,14 @@ import (
 
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	replicaModule "github.com/ethereum/go-ethereum/replica"
+	"github.com/Shopify/sarama"
 	"gopkg.in/urfave/cli.v1"
 )
 
@@ -73,6 +79,22 @@ The output of this command is supposed to be machine-readable.
 		Usage:     "Display license information",
 		ArgsUsage: " ",
 		Category:  "MISCELLANEOUS COMMANDS",
+	}
+	kafkaEventsCommand = cli.Command{
+		Action:    utils.MigrateFlags(kafkaEvents),
+		Name:      "kafkaEvents",
+		Usage:     "Walk through Kafka events",
+		ArgsUsage: " ",
+		Category:  "MISCELLANEOUS COMMANDS",
+		Flags: []cli.Flag{
+			utils.KafkaLogBrokerFlag,
+			utils.KafkaEventTopicFlag,
+			cli.IntFlag{
+				Name:  "verbosity",
+				Usage: "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail",
+				Value: 3,
+			},
+		},
 	}
 )
 
@@ -122,6 +144,52 @@ func version(ctx *cli.Context) error {
 	fmt.Printf("GOPATH=%s\n", os.Getenv("GOPATH"))
 	fmt.Printf("GOROOT=%s\n", runtime.GOROOT())
 	return nil
+}
+
+func kafkaEvents(ctx *cli.Context) error {
+	offset := sarama.OffsetOldest
+	if len(ctx.Args()) >= 1 {
+		num, _ := strconv.Atoi(ctx.Args()[0])
+		offset = int64(num)
+	}
+	consumer, err := replicaModule.NewKafkaEventConsumerFromURLs(ctx.GlobalString(utils.KafkaLogBrokerFlag.Name), ctx.GlobalString(utils.KafkaEventTopicFlag.Name), common.Hash{}, offset)
+	if err != nil { return err }
+	logsEventCh := make(chan []*types.Log)
+  logsEventSub := consumer.SubscribeLogsEvent(logsEventCh)
+  removedLogsEventCh := make(chan core.RemovedLogsEvent)
+  removedLogsEventSub := consumer.SubscribeRemovedLogsEvent(removedLogsEventCh)
+  chainHeadEventCh := make(chan core.ChainHeadEvent)
+  chainHeadEventSub := consumer.SubscribeChainHeadEvent(chainHeadEventCh)
+	chainSideEventCh := make(chan core.ChainSideEvent)
+	chainSideEventSub := consumer.SubscribeChainSideEvent(chainSideEventCh)
+  offsetCh := make(chan replicaModule.OffsetHash)
+  offsetSub := consumer.SubscribeOffsets(offsetCh)
+  defer logsEventSub.Unsubscribe()
+  defer removedLogsEventSub.Unsubscribe()
+  defer chainHeadEventSub.Unsubscribe()
+	defer chainSideEventSub.Unsubscribe()
+  defer offsetSub.Unsubscribe()
+	logCounter := 0
+	removedLogs := 0
+	consumer.Start()
+	for {
+		select {
+		case logs := <-logsEventCh:
+			logCounter += len(logs)
+		case rlogs := <-removedLogsEventCh:
+			removedLogs += len(rlogs.Logs)
+		case head := <-chainHeadEventCh:
+			log.Info("New Head", "hash", head.Block.Hash(), "no", head.Block.Number(), "logs", logCounter, "rlogs", removedLogs)
+			logCounter = 0
+			removedLogs = 0
+		case head := <-chainSideEventCh:
+			log.Info("Side Head", "hash", head.Block.Hash(), "no", head.Block.Number(), "logs", logCounter, "rlogs", removedLogs)
+			logCounter = 0
+			removedLogs = 0
+		case offset := <-offsetCh:
+			log.Info("Offset", "offset", offset)
+		}
+	}
 }
 
 func license(_ *cli.Context) error {

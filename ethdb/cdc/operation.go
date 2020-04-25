@@ -241,7 +241,9 @@ func (op *Operation) Apply(db ethdb.Database) ([]byte, error) {
       }
 
     }
-    if err := batch.Write(); err != nil { return headHash, err }
+    applyTime += time.Since(applyStart)
+    lastApply = time.Now()
+    return headHash, batch.Write()
   case OpHeartbeat:
     return nil, updateOffset(db, op)
   default:
