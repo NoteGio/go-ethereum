@@ -762,6 +762,7 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 			total += len(queue)
 			queue = append(queue[:0], sched.Missing(count)...)
 		}
+		errCh <- nil
 	}()
 
 	return errCh
@@ -834,12 +835,22 @@ func migrateState(ctx *cli.Context) error {
 		return fmt.Errorf("Source block hash empty")
 	}
 	latestHeaderNumber := rawdb.ReadHeaderNumber(oldDb, latestBlockHash)
-	latestBlock := rawdb.ReadBlock(newDb, latestBlockHash, *latestHeaderNumber)
+	latestBlock := rawdb.ReadBlock(oldDb, latestBlockHash, *latestHeaderNumber)
 
-	log.Info("Syncing genesis block state", "hash", block.Hash(), "root", block.Root())
-	genesisErrCh := syncState(block.Root(), srcDb, newDb)
-	log.Info("Syncing latest block state", "hash", latestBlock.Hash(), "root", latestBlock.Root())
-	latestErrCh := syncState(latestBlock.Root(), srcDb, newDb)
+	var genesisErrCh, latestErrCh <-chan error
+	if os.Getenv("SKIP_STATE_SYNC") != "true" {
+		log.Info("Syncing genesis block state", "hash", block.Hash(), "root", block.Root())
+		genesisErrCh = syncState(block.Root(), srcDb, newDb)
+		log.Info("Syncing latest block state", "hash", latestBlock.Hash(), "root", latestBlock.Root())
+		latestErrCh = syncState(latestBlock.Root(), srcDb, newDb)
+	} else {
+		genesisErrChSend := make(chan error, 1)
+		genesisErrCh = genesisErrChSend
+		latestErrChSend := make(chan error, 1)
+		latestErrCh = latestErrChSend
+		genesisErrChSend <- nil
+		latestErrChSend <- nil
+	}
 
 	chainConfig := rawdb.ReadChainConfig(oldDb, block.Hash())
 	batch := newDb.NewBatch()
