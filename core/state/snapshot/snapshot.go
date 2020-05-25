@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
+	hlcdc "github.com/ethereum/go-ethereum/ethdb/hlcdc/iface"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/trie"
@@ -241,6 +242,11 @@ func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, destructs m
 		return fmt.Errorf("parent [%#x] snapshot missing", parentRoot)
 	}
 	snap := parent.Update(blockRoot, destructs, accounts, storage)
+
+	switch updater := t.diskdb.(type) {
+	case hlcdc.StateUpdater:
+		updater.StateUpdate(blockRoot, parentRoot, destructs, accounts, storage)
+	}
 
 	// Save the new snapshot for later
 	t.lock.Lock()

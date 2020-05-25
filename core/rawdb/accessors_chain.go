@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	hlcdc "github.com/ethereum/go-ethereum/ethdb/hlcdc/iface"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -278,6 +279,10 @@ func WriteHeader(db ethdb.KeyValueWriter, header *types.Header) {
 	if err := db.Put(key, data); err != nil {
 		log.Crit("Failed to store header", "err", err)
 	}
+	switch bp := db.(type) {
+	case hlcdc.BlockPublisher:
+		bp.WriteHeader(hash, number, data)
+	}
 }
 
 // DeleteHeader removes all block header data associated with a hash.
@@ -350,6 +355,10 @@ func ReadCanonicalBodyRLP(db ethdb.Reader, number uint64) rlp.RawValue {
 func WriteBodyRLP(db ethdb.KeyValueWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if err := db.Put(blockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
+	}
+	switch bp := db.(type) {
+	case hlcdc.BlockPublisher:
+		bp.WriteBody(hash, number, rlp)
 	}
 }
 
@@ -447,6 +456,10 @@ func WriteTd(db ethdb.KeyValueWriter, hash common.Hash, number uint64, td *big.I
 	}
 	if err := db.Put(headerTDKey(number, hash), data); err != nil {
 		log.Crit("Failed to store block total difficulty", "err", err)
+	}
+	switch bp := db.(type) {
+	case hlcdc.BlockPublisher:
+		bp.WriteTd(hash, number, td)
 	}
 }
 
@@ -562,6 +575,10 @@ func WriteReceipts(db ethdb.KeyValueWriter, hash common.Hash, number uint64, rec
 	if err := db.Put(blockReceiptsKey(number, hash), bytes); err != nil {
 		log.Crit("Failed to store block receipts", "err", err)
 	}
+	switch bp := db.(type) {
+	case hlcdc.BlockPublisher:
+		bp.WriteReceipts(hash, number, bytes)
+	}
 }
 
 // DeleteReceipts removes all receipt data associated with a block hash.
@@ -632,6 +649,10 @@ func DeleteBlock(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	DeleteHeader(db, hash, number)
 	DeleteBody(db, hash, number)
 	DeleteTd(db, hash, number)
+	switch bp := db.(type) {
+	case hlcdc.BlockPublisher:
+		bp.DeleteBlock(hash, number)
+	}
 }
 
 // DeleteBlockWithoutNumber removes all block data associated with a hash, except
