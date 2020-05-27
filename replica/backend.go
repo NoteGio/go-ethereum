@@ -493,6 +493,7 @@ func (backend *ReplicaBackend) handleBlockUpdates() {
       }
       backend.chainFeed.Send(core.ChainEvent{block, block.Hash(), allLogs})
       backend.chainHeadFeed.Send(core.ChainHeadEvent{block})
+      lastBlock = block
     }
   }
 }
