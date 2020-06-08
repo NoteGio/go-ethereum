@@ -750,7 +750,9 @@ func (args *CallArgs) ToMessage(globalGasCap *big.Int) types.Message {
 	}
 
 	// Set default gas & gas price if none were set
-	gas := uint64(math.MaxUint64 / 2)
+	// gas := uint64(math.MaxUint64 / 2)
+	// Default is 1% of the global gas cap, but you can get more by specifying
+	gas := globalGasCap.Uint64() / 100
 	if args.Gas != nil {
 		gas = uint64(*args.Gas)
 	}
@@ -890,7 +892,15 @@ func (s *PublicBlockChainAPI) Call(ctx context.Context, args CallArgs, blockNrOr
 	if overrides != nil {
 		accounts = *overrides
 	}
-	result, _, err := DoCall(ctx, s.b, args, nil, blockNrOrHash, accounts, vm.Config{}, 5*time.Second, s.b.RPCGasCap())
+	var timeout time.Duration
+	if args.Gas != nil {
+		timeout = time.Duration(*args.Gas / 10000000) * time.Second
+	}
+	if timeout < 5 * time.Second {
+		timeout = 5 * time.Second
+	}
+
+	result, _, err := DoCall(ctx, s.b, args, nil, blockNrOrHash, accounts, vm.Config{}, timeout, s.b.RPCGasCap())
 	if err != nil {
 		return nil, err
 	}

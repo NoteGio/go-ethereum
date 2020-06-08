@@ -163,17 +163,19 @@ type jsonCodec struct {
 	encMu   sync.Mutex                // guards the encoder
 	encode  func(v interface{}) error // encoder to allow multiple transports
 	conn    deadlineCloser
+	ctx     context.Context
 }
 
 // NewFuncCodec creates a codec which uses the given functions to read and write. If conn
 // implements ConnRemoteAddr, log messages will use it to include the remote address of
 // the connection.
-func NewFuncCodec(conn deadlineCloser, encode, decode func(v interface{}) error) ServerCodec {
+func NewFuncCodec(conn deadlineCloser, encode, decode func(v interface{}) error, ctx context.Context) ServerCodec {
 	codec := &jsonCodec{
 		closeCh: make(chan interface{}),
 		encode:  encode,
 		decode:  decode,
 		conn:    conn,
+		ctx:     ctx,
 	}
 	if ra, ok := conn.(ConnRemoteAddr); ok {
 		codec.remote = ra.RemoteAddr()
@@ -183,11 +185,18 @@ func NewFuncCodec(conn deadlineCloser, encode, decode func(v interface{}) error)
 
 // NewCodec creates a codec on the given connection. If conn implements ConnRemoteAddr, log
 // messages will use it to include the remote address of the connection.
-func NewCodec(conn Conn) ServerCodec {
+func NewCodec(conn Conn, ctx context.Context) ServerCodec {
 	enc := json.NewEncoder(conn)
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return NewFuncCodec(conn, enc.Encode, dec.Decode)
+	return NewFuncCodec(conn, enc.Encode, dec.Decode, ctx)
+}
+
+func (c *jsonCodec) context() context.Context{
+	if c.ctx == nil {
+		c.ctx = context.Background()
+	}
+	return c.ctx
 }
 
 func (c *jsonCodec) remoteAddr() string {

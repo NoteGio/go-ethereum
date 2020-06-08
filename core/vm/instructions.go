@@ -24,6 +24,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/crypto/sha3"
+
+	"runtime"
 )
 
 var (
@@ -686,6 +688,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]
 		input        = callContext.memory.GetCopy(offset.Int64(), size.Int64())
 		gas          = callContext.contract.Gas
 	)
+	runtime.Gosched()
 	if interpreter.evm.chainRules.IsEIP150 {
 		gas -= gas / 64
 	}
@@ -720,7 +723,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 		input        = callContext.memory.GetCopy(offset.Int64(), size.Int64())
 		gas          = callContext.contract.Gas
 	)
-
+	runtime.Gosched()
 	// Apply EIP150
 	gas -= gas / 64
 	callContext.contract.UseGas(gas)
@@ -741,6 +744,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([
 }
 
 func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	runtime.Gosched()
 	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
 	interpreter.intPool.putOne(callContext.stack.pop())
 	gas := interpreter.evm.callGasTemp
@@ -770,6 +774,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]by
 }
 
 func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	runtime.Gosched()
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	interpreter.intPool.putOne(callContext.stack.pop())
 	gas := interpreter.evm.callGasTemp
@@ -799,6 +804,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) (
 }
 
 func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	runtime.Gosched()
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	interpreter.intPool.putOne(callContext.stack.pop())
 	gas := interpreter.evm.callGasTemp
@@ -824,6 +830,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCt
 }
 
 func opStaticCall(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+	runtime.Gosched()
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	interpreter.intPool.putOne(callContext.stack.pop())
 	gas := interpreter.evm.callGasTemp

@@ -19,6 +19,7 @@ package rpc
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
@@ -35,7 +36,19 @@ func (s *Server) ServeListener(l net.Listener) error {
 			return err
 		}
 		log.Trace("Accepted RPC connection", "conn", conn.RemoteAddr())
-		go s.ServeCodec(NewCodec(conn), 0)
+		ctx, cancel := context.WithCancel(context.Background())
+		codec := NewCodec(conn, ctx)
+		go func() {
+			for {
+				if _, err := conn.Write([]byte{}); err != nil {
+					cancel()
+					break
+				}
+				// TODO: Refactor with ticker (and make sure you close it)
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
+		go s.ServeCodec(codec, 0)
 	}
 }
 
@@ -51,6 +64,6 @@ func DialIPC(ctx context.Context, endpoint string) (*Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		return NewCodec(conn), err
+		return NewCodec(conn, ctx), err
 	})
 }

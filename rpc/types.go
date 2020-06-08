@@ -47,6 +47,7 @@ type Error interface {
 type ServerCodec interface {
 	readBatch() (msgs []*jsonrpcMessage, isBatch bool, err error)
 	close()
+	context() context.Context
 	jsonWriter
 }
 

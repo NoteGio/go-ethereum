@@ -17,12 +17,17 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -49,6 +55,9 @@ var (
 		ArgsUsage: "<genesisPath>",
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
+			utils.KafkaLogTopicFlag,
+			utils.KafkaLogBrokerFlag,
+			utils.KafkaTransactionTopicFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
 		Description: `
@@ -214,6 +223,110 @@ Use "ethereum dump 0" to dump the genesis block.`,
 			utils.SyncModeFlag,
 		},
 		Category: "BLOCKCHAIN COMMANDS",
+	}
+	setHeadCommand = cli.Command{
+		Action:    utils.MigrateFlags(setHead),
+		Name:      "sethead",
+		Usage:     "Sets the head block to a specific block",
+		ArgsUsage: "[<blockHash> | <blockNum> | <-blockCount>]...",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+			utils.AncientFlag,
+			utils.CacheFlag,
+			utils.SyncModeFlag,
+			utils.KafkaLogBrokerFlag,
+			utils.KafkaLogTopicFlag,
+		},
+		Category: "BLOCKCHAIN COMMANDS",
+		Description: `
+The arguments are interpreted as block numbers, hashes, or a number of blocks to be rolled back.
+Use "ethereum sethead -2" to drop the two most recent blocks`,
+	}
+	verifyStateTrieCommand = cli.Command{
+     Action:    utils.MigrateFlags(verifyStateTrie),
+     Name:      "verifystatetrie",
+     Usage:     "Verfies the state trie",
+     Flags: []cli.Flag{
+       utils.DataDirFlag,
+			 utils.AncientFlag,
+       utils.CacheFlag,
+       utils.SyncModeFlag,
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Verify proofs of the latest block state trie. Exit 0 if correct, else exit 1`,
+	}
+	compactCommand = cli.Command{
+     Action:    utils.MigrateFlags(compact),
+     Name:      "compactdb",
+     Usage:     "Compacts the database",
+     Flags: []cli.Flag{
+       utils.DataDirFlag,
+			 utils.AncientFlag,
+       utils.CacheFlag,
+       utils.SyncModeFlag,
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Compacts the database`,
+	}
+	stateMigrateCommand = cli.Command{
+     Action:    utils.MigrateFlags(migrateState),
+     Name:      "migratestate",
+     Usage:     "Migrates the latest state from a DB+Ancient to a new  DB+Ancient",
+     Flags: []cli.Flag{
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Migrates state from one leveldb to another`,
+	}
+	repairMigrationCommand = cli.Command{
+     Action:    utils.MigrateFlags(repairMigration),
+     Name:      "repairmigration",
+     Usage:     "Repairs earlier migrations",
+     Flags: []cli.Flag{
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Repairs earlier migrations`,
+	}
+	repairFreezerIndexCommand = cli.Command{
+     Action:    utils.MigrateFlags(repairFreezerIndex),
+     Name:      "repairfreezerindex",
+     Usage:     "Reindexes the freezer",
+     Flags: []cli.Flag{
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Repairs a broken freezer index`,
+	}
+	freezerDumpCommand = cli.Command{
+     Action:    utils.MigrateFlags(freezerDump),
+     Name:      "freezerdump",
+     Usage:     "Dump the freezer as jsonl",
+     Flags: []cli.Flag{
+       utils.DataDirFlag,
+       utils.CacheFlag,
+       utils.SyncModeFlag,
+			 utils.AncientFlag,
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Dump the freezer as jsonl`,
+	}
+	freezerLoadCommand = cli.Command{
+     Action:    utils.MigrateFlags(freezerLoad),
+     Name:      "freezerload",
+     Usage:     "Load jsonl from stdin to an ancients store",
+     Flags: []cli.Flag{
+       utils.DataDirFlag,
+       utils.CacheFlag,
+       utils.SyncModeFlag,
+			 utils.AncientFlag,
+     },
+     Category: "BLOCKCHAIN COMMANDS",
+     Description: `
+Load jsonl from stdin to ancients`,
 	}
 )
 
@@ -583,6 +696,364 @@ func dump(ctx *cli.Context) error {
 	}
 	return nil
 }
+
+func setHead(ctx *cli.Context) error {
+	if len(ctx.Args()) < 1 {
+		utils.Fatalf("This command requires an argument.")
+	}
+	stack := makeFullNode(ctx)
+	chain, db := utils.MakeChain(ctx, stack, false)
+	arg := ctx.Args()[0]
+	blockNumber, err := strconv.Atoi(arg)
+	if err != nil {
+		block := chain.GetBlockByHash(common.HexToHash(arg))
+		blockNumber = int(block.Number().Int64())
+	} else if blockNumber < 0 {
+		latestHash := rawdb.ReadHeadBlockHash(db)
+		block := chain.GetBlockByHash(latestHash)
+		blockNumber = int(block.Number().Int64()) + blockNumber
+	}
+	if err := chain.SetHead(uint64(blockNumber)); err != nil {
+		fmt.Printf("Failed to set head to %v", blockNumber)
+		return err
+	}
+	chain.Stop()
+	db.Close()
+	fmt.Printf("Rolled back chain to block %v\n", blockNumber)
+	return nil
+}
+
+func freezerDump(ctx *cli.Context) error {
+	if len(ctx.Args()) < 2 {
+		return fmt.Errorf("Usage: freezerDump [ancients] [leveldb] [?offset]")
+	}
+	startIndex := 0
+	if len(ctx.Args()) == 3 {
+		startIndex, _ = strconv.Atoi(ctx.Args()[2])
+	}
+	db, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[1], 16, 16, ctx.Args()[0], "new")
+	if err != nil { return err }
+	count, err := db.Ancients()
+	if err != nil { return err }
+	log.Info("Loading ancients", "count", count)
+	for i := uint64(startIndex); i < count; i++ {
+		data := make(map[string]string)
+		data["index"] = fmt.Sprintf("%v", i)
+		for _, table := range []string{"headers","hashes","bodies","receipts","diffs"} {
+			raw, err := db.Ancient(table, i)
+			if err != nil { return fmt.Errorf("Error retrieving %v # %v: %v", table, i, err.Error()) }
+			data[table] = hex.EncodeToString(raw)
+		}
+		jsonData, err := json.Marshal(data)
+		if err != nil { return fmt.Errorf("Error marshalling %v: %v", i, err.Error()) }
+		os.Stdout.Write(jsonData)
+		os.Stdout.Write([]byte("\n"))
+	}
+	return nil
+}
+
+func freezerLoad(ctx *cli.Context) error {
+	if len(ctx.Args()) != 2 {
+		return fmt.Errorf("Usage: freezerDump [ancients] [leveldb]")
+	}
+	var db ethdb.AncientStore
+	var err error
+	if strings.HasPrefix(ctx.Args()[0], "s3://") {
+		db, err = rawdb.NewS3Freezer(ctx.Args()[0], 128)
+	} else {
+		db, err = rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[1], 16, 16, ctx.Args()[0], "new")
+	}
+	// db, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[1], 16, 16, ctx.Args()[0], "new")
+	if err != nil { return err }
+	count, err := db.Ancients()
+	if err != nil { return err }
+	log.Info("Starting load", "freezer size", count)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadBytes('\n')
+	for err == nil {
+		if len(line) == 0 {
+			line, err = reader.ReadBytes('\n')
+			continue
+		}
+		data := make(map[string]string)
+		if err := json.Unmarshal(line, &data); err != nil { return err }
+		blockNumber, err := strconv.Atoi(data["index"])
+		if err != nil { return err }
+		if uint64(blockNumber) != count { return fmt.Errorf("Unexpected block: %d != %d", blockNumber, count) }
+		hash, err := hex.DecodeString(data["hashes"])
+		if err != nil { return err }
+		header, err := hex.DecodeString(data["headers"])
+		if err != nil { return err }
+		body, err := hex.DecodeString(data["bodies"])
+		if err != nil { return err }
+		receipts, err := hex.DecodeString(data["receipts"])
+		if err != nil { return err }
+		td, err := hex.DecodeString(data["diffs"])
+		if err != nil { return err }
+		err = db.AppendAncient(uint64(blockNumber), hash, header, body, receipts, td)
+		if err != nil { return err }
+		count++
+		line, err = reader.ReadBytes('\n')
+	}
+	db.Sync()
+	if err != io.EOF { return err }
+	log.Info("Ancient sync done. Indexing freezer")
+	// return rawdb.InitDatabaseFromFreezer(db)
+	return nil
+}
+
+func verifyStateTrie(ctx *cli.Context) error {
+  stack := makeFullNode(ctx)
+  bc, db := utils.MakeChain(ctx, stack, false)
+  latestHash := rawdb.ReadHeadBlockHash(db)
+  block := bc.GetBlockByHash(latestHash)
+
+  tr, err := trie.New(block.Root(), trie.NewDatabase(db))
+  if err != nil {
+    log.Error(fmt.Sprintf("Unhandled trie error"))
+    return err
+  }
+  nodesToCheck := 1000000
+  if len(ctx.Args()) > 0 {
+    arg := ctx.Args()[0]
+    nodesToCheck, err = strconv.Atoi(arg)
+    if err != nil { return err }
+  }
+
+  iterators := []trie.NodeIterator{}
+  for i := 0; i < 256; i++ {
+    iterators = append(iterators, tr.NodeIterator([]byte{byte(i)}))
+  }
+  for i := 0; i < nodesToCheck; i += len(iterators) {
+    log.Info("Checking leaves", "checked", i, "limit", nodesToCheck)
+    for _, it := range iterators {
+      for it.Next(true) {
+        if it.Leaf() {
+          break
+        }
+      }
+      if err := it.Error(); err != nil {
+        return err
+      }
+    }
+  }
+  bc.Stop()
+  db.Close()
+  // fmt.Printf("Rolled back chain to block %v\n", blockNumber)
+  return nil
+}
+
+type trieRequest struct {
+	hash common.Hash
+	i int
+	data []byte
+	err error
+}
+
+func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-chan error {
+	errCh := make(chan error)
+	go func() {
+		count := 10000
+		sched := state.NewStateSync(root, newDb, trie.NewSyncBloom(1, newDb))
+		log.Info("Syncing", "root", root)
+		queue := append([]common.Hash{}, sched.Missing(count)...)
+		total := 0
+		for len(queue) > 0 {
+			log.Info("Processing items", "completed", total, "known", sched.Pending())
+			results := make([]trie.SyncResult, len(queue))
+			var wg sync.WaitGroup
+			ch := make(chan trieRequest, runtime.NumCPU())
+			popCh := make(chan trieRequest, runtime.NumCPU())
+			for i := 0; i < runtime.NumCPU(); i++ {
+				wg.Add(1)
+				go func(wg *sync.WaitGroup) {
+					defer wg.Done()
+					for r := range ch {
+						r.data, r.err = srcDb.TrieDB().Node(r.hash)
+						popCh <- r
+					}
+				}(&wg)
+			}
+			go func(wg *sync.WaitGroup) {
+				wg.Wait()
+				close(popCh)
+			}(&wg)
+			go func() {
+				for i, hash := range queue {
+					ch <- trieRequest{hash: hash, i: i}
+				}
+				close(ch)
+			}()
+			for r := range popCh {
+				if r.err != nil {
+					errCh <- r.err
+					return
+				}
+				results[r.i] = trie.SyncResult{Hash: r.hash, Data: r.data}
+			}
+			if _, index, err := sched.Process(results); err != nil {
+				errCh <- fmt.Errorf("failed to process result #%d: %v", index, err)
+				return
+			}
+			batch := newDb.NewBatch()
+			if err := sched.Commit(batch); err != nil {
+				errCh <- fmt.Errorf("failed to commit data: %v", err)
+				return
+			}
+			batch.Write()
+			total += len(queue)
+			queue = append(queue[:0], sched.Missing(count)...)
+		}
+	}()
+
+	return errCh
+}
+
+// repairMigration adds in Hash -> Number mappings and TxLookupEntries, which
+// were inadvertently omitted from an earlier iteration of the state migration
+// tool.
+func repairMigration(ctx *cli.Context) error {
+	newDb, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[1], 16, 16, ctx.Args()[0], "new")
+	frozen, err := newDb.Ancients()
+	if err != nil { return err }
+	if frozen == 0 {
+		return fmt.Errorf("Freezer is empty")
+	}
+	hash := rawdb.ReadCanonicalHash(newDb, frozen)
+	block := rawdb.ReadBlock(newDb, hash, frozen)
+	for {
+		batch := newDb.NewBatch()
+		rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64())
+		rawdb.WriteTxLookupEntries(batch, block)
+		batch.Write()
+		nextHash := rawdb.ReadCanonicalHash(newDb, block.NumberU64() + 1)
+		block = rawdb.ReadBlock(newDb, nextHash, block.NumberU64() + 1)
+		if block == nil { return nil }
+		if block.NumberU64() % 1000 == 0 {
+			log.Info("Repairing block", "number", block.NumberU64(), "hash", block.Hash())
+		}
+	}
+}
+
+func repairFreezerIndex(ctx *cli.Context) error {
+	newDb, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[1], 16, 16, ctx.Args()[0], "new")
+	if err != nil { return err }
+	hash := rawdb.ReadHeadFastBlockHash(newDb)
+	rawdb.InitDatabaseFromFreezer(newDb)
+	rawdb.WriteHeadHeaderHash(newDb, hash)
+	rawdb.WriteHeadFastBlockHash(newDb, hash)
+	return nil
+}
+
+func migrateState(ctx *cli.Context) error {
+	if len(ctx.Args()) < 3 {
+    return fmt.Errorf("Usage: migrateState [ancients] [oldLeveldb] [newLeveldb] [?kafkaTopic]")
+  }
+	newDb, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[2], 16, 16, ctx.Args()[0], "new")
+	if err != nil { return err }
+	frozen, err := newDb.Ancients()
+	if err != nil { return err }
+	if frozen == 0 {
+		return fmt.Errorf("Freezer is empty")
+	}
+	oldDb, err := rawdb.NewLevelDBDatabase(ctx.Args()[1], 16, 16, "old")
+	if err != nil { return err }
+	if len(ctx.Args()) == 4 {
+		key := fmt.Sprintf("cdc-log-%v-offset", ctx.Args()[3])
+		offset, err := oldDb.Get([]byte(key))
+		if err != nil { return err }
+		if err := newDb.Put([]byte(key), offset); err != nil { return err }
+		log.Info("Copied offset", "key", key)
+	}
+	start := time.Now()
+	ancientErrCh := make(chan error, 1)
+	if os.Getenv("SKIP_INIT_FREEZER") != "true" {
+		go func() {
+			rawdb.InitDatabaseFromFreezer(newDb)
+			ancientErrCh <- nil
+			log.Info("Initialized from freezer", "elapsed", time.Since(start))
+		}()
+	} else {
+		ancientErrCh <- nil
+	}
+	srcDb := state.NewDatabase(oldDb)
+
+	genesisHash := rawdb.ReadCanonicalHash(oldDb, 0)
+	block := rawdb.ReadBlock(oldDb, genesisHash, 0)
+
+	latestBlockHash := rawdb.ReadHeadFastBlockHash(oldDb) // Find the latest blockhash migrated to the new database
+	if latestBlockHash == (common.Hash{}) {
+		return fmt.Errorf("Source block hash empty")
+	}
+	latestHeaderNumber := rawdb.ReadHeaderNumber(oldDb, latestBlockHash)
+	latestBlock := rawdb.ReadBlock(newDb, latestBlockHash, *latestHeaderNumber)
+
+	log.Info("Syncing genesis block state", "hash", block.Hash(), "root", block.Root())
+	genesisErrCh := syncState(block.Root(), srcDb, newDb)
+	log.Info("Syncing latest block state", "hash", latestBlock.Hash(), "root", latestBlock.Root())
+	latestErrCh := syncState(latestBlock.Root(), srcDb, newDb)
+
+	chainConfig := rawdb.ReadChainConfig(oldDb, block.Hash())
+	batch := newDb.NewBatch()
+	rawdb.WriteTd(batch, block.Hash(), block.NumberU64(), rawdb.ReadTd(oldDb, block.Hash(), block.NumberU64()))
+	rawdb.WriteBlock(batch, block)
+	rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), nil)
+	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
+	rawdb.WriteChainConfig(batch, block.Hash(), chainConfig)
+	rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64())
+	rawdb.WriteTxLookupEntries(batch, block)
+	batch.Write()
+
+	if err := <-ancientErrCh; err != nil { return err }
+	srcBlockHash := rawdb.ReadHeadFastBlockHash(newDb) // Find the latest blockhash migrated to the new database
+	if srcBlockHash == (common.Hash{}) {
+		return fmt.Errorf("Source block hash empty")
+	}
+	srcHeaderNumber := rawdb.ReadHeaderNumber(newDb, srcBlockHash)
+	block = rawdb.ReadBlock(newDb, srcBlockHash, *srcHeaderNumber)
+	for {
+		batch := newDb.NewBatch()
+		rawdb.WriteTd(batch, block.Hash(), block.NumberU64(), rawdb.ReadTd(oldDb, block.Hash(), block.NumberU64()))
+		rawdb.WriteBlock(batch, block)
+		rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), rawdb.ReadReceipts(oldDb, block.Hash(), block.NumberU64(), chainConfig))
+		rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
+		rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64())
+		rawdb.WriteTxLookupEntries(batch, block)
+		batch.Write()
+		nextHash := rawdb.ReadCanonicalHash(oldDb, block.NumberU64() + 1)
+		if nextHash == (common.Hash{}) {
+			// There's an edge case where early blocks may still be in the freezer
+			// even though they didn't get migrated, and thus the olddb won't have the
+			// canonical hash but the newdb will
+			nextHash = rawdb.ReadCanonicalHash(newDb, block.NumberU64() + 1)
+			if nextHash == (common.Hash{}) {
+				log.Info("Migrated up to block", "number", block.NumberU64(), "hash", block.Hash(), "time", block.Time())
+				break
+			}
+		}
+		block = rawdb.ReadBlock(oldDb, nextHash, block.NumberU64() + 1)
+		if block.NumberU64() % 1000 == 0 {
+			log.Info("Migrating block", "number", block.NumberU64(), "hash", block.Hash())
+		}
+	}
+
+	if err := <-genesisErrCh; err != nil { return err }
+	if err := <-latestErrCh; err != nil { return err }
+	rawdb.WriteHeadBlockHash(newDb, block.Hash())
+	rawdb.WriteHeadHeaderHash(newDb, block.Hash())
+	rawdb.WriteHeadFastBlockHash(newDb, block.Hash())
+	return nil
+}
+
+func compact(ctx *cli.Context) error {
+  stack := makeFullNode(ctx)
+  _, db := utils.MakeChain(ctx, stack, false)
+	start := time.Now()
+	err := db.Compact(nil, nil)
+	log.Info("Done", "time", time.Since(start))
+	return err
+}
+
 
 func inspect(ctx *cli.Context) error {
 	node, _ := makeConfigNode(ctx)

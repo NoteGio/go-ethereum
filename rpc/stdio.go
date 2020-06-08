@@ -36,7 +36,7 @@ func DialIO(ctx context.Context, in io.Reader, out io.Writer) (*Client, error) {
 		return NewCodec(stdioConn{
 			in:  in,
 			out: out,
-		}), nil
+		}, ctx), nil
 	})
 }
 

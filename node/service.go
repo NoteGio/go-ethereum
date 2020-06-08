@@ -17,15 +17,19 @@
 package node
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/cdc"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // ServiceContext is a collection of service independent options inherited from
@@ -42,18 +46,49 @@ type ServiceContext struct {
 // if no previous can be found) from within the node's data directory. If the
 // node is an ephemeral one, a memory database is returned.
 func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, namespace string) (ethdb.Database, error) {
+	var db ethdb.Database
+	var err error
 	if ctx.Config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
+		db = rawdb.NewMemoryDatabase()
+	} else {
+		db, err = rawdb.NewLevelDBDatabase(ctx.Config.ResolvePath(name), cache, handles, namespace)
+		if ctx.Config.KafkaLogBroker != "" {
+	   producer, err := cdc.NewKafkaLogProducerFromURL(
+	           ctx.Config.KafkaLogBroker,
+	           ctx.Config.KafkaLogTopic,
+	   )
+	   if err != nil { return nil, err }
+	   // TODO: Add options for a readStream
+	   db = cdc.NewDBWrapper(db, producer, nil)
+		}
 	}
-	return rawdb.NewLevelDBDatabase(ctx.Config.ResolvePath(name), cache, handles, namespace)
+	return db, err
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
 // creates one if no previous can be found) from within the node's data directory,
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
-// memory database is returned.
+// memory database is returned. If a KafkaLogBroker config is provided, all
+// write operations will be sent to Kafka.
 func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
+	db, err := ctx.OpenRawDatabaseWithFreezer(name, cache, handles, freezer, namespace)
+	if ctx.Config.KafkaLogBroker != "" {
+   producer, err := cdc.NewKafkaLogProducerFromURL(
+           ctx.Config.KafkaLogBroker,
+           ctx.Config.KafkaLogTopic,
+   )
+   if err != nil { return nil, err }
+   // TODO: Add options for a readStream
+   db = cdc.NewDBWrapper(db, producer, nil)
+	}
+	return db, err
+}
+
+// OpenRawDatabaseWithFreezer returns a database equivalent to
+// OpenDatabaseWithFreezer, but it will never be wrapped to send write
+// operations to Kafka.
+func (ctx *ServiceContext) OpenRawDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
 	if ctx.Config.DataDir == "" {
 		return rawdb.NewMemoryDatabase(), nil
 	}
@@ -62,7 +97,13 @@ func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handl
 	switch {
 	case freezer == "":
 		freezer = filepath.Join(root, "ancient")
+	case strings.HasPrefix(freezer, "s3://"):
+		log.Info("S3 freezer", "path", freezer)
+	case strings.HasPrefix(freezer, "s3:/"):
+		freezer = fmt.Sprintf("s3://%v", strings.TrimPrefix(freezer, "s3:/"))
+		log.Info("S3 freezer", "path", freezer)
 	case !filepath.IsAbs(freezer):
+		log.Info("Non-s3 path", "path", freezer)
 		freezer = ctx.Config.ResolvePath(freezer)
 	}
 	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)

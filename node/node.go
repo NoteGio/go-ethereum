@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/cdc"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/debug"
 	"github.com/ethereum/go-ethereum/log"
@@ -638,10 +639,26 @@ func (n *Node) EventMux() *event.TypeMux {
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
 func (n *Node) OpenDatabase(name string, cache, handles int, namespace string) (ethdb.Database, error) {
+	var db ethdb.Database
+	var err error
 	if n.config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
+		db = rawdb.NewMemoryDatabase()
+	} else {
+		db, err = rawdb.NewLevelDBDatabase(n.config.ResolvePath(name), cache, handles, namespace)
 	}
-	return rawdb.NewLevelDBDatabase(n.config.ResolvePath(name), cache, handles, namespace)
+	if err != nil {
+		return db, err
+	}
+ if n.config.KafkaLogBroker != "" {
+		producer, err := cdc.NewKafkaLogProducerFromURL(
+						n.config.KafkaLogBroker,
+						n.config.KafkaLogTopic,
+				)
+		if err != nil { return nil, err }
+		// TODO: Add options for a readStream
+		db = cdc.NewDBWrapper(db, producer, nil)
+	}
+	return db, nil
 }
 
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
@@ -650,18 +667,40 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string) (
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
 func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer, namespace string) (ethdb.Database, error) {
+	var db ethdb.Database
+	var err error
 	if n.config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
-	}
-	root := n.config.ResolvePath(name)
+		db = rawdb.NewMemoryDatabase()
+	} else {
+		root := n.config.ResolvePath(name)
 
-	switch {
-	case freezer == "":
-		freezer = filepath.Join(root, "ancient")
-	case !filepath.IsAbs(freezer):
-		freezer = n.config.ResolvePath(freezer)
+		switch {
+		case freezer == "":
+			freezer = filepath.Join(root, "ancient")
+		case strings.HasPrefix(freezer, "s3://"):
+			log.Info("S3 freezer", "path", freezer)
+		case strings.HasPrefix(freezer, "s3:/"):
+			freezer = fmt.Sprintf("s3://%v", strings.TrimPrefix(freezer, "s3:/"))
+			log.Info("S3 freezer", "path", freezer)
+		case !filepath.IsAbs(freezer):
+			log.Info("Non-s3 path", "path", freezer)
+			freezer = n.config.ResolvePath(freezer)
+		}
+		db, err = rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
+		if err != nil {
+			return db, err
+		}
 	}
-	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
+  if n.config.KafkaLogBroker != "" {
+    producer, err := cdc.NewKafkaLogProducerFromURL(
+            n.config.KafkaLogBroker,
+            n.config.KafkaLogTopic,
+    )
+    if err != nil { return nil, err }
+    // TODO: Add options for a readStream
+    db = cdc.NewDBWrapper(db, producer, nil)
+  }
+  return db, nil
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

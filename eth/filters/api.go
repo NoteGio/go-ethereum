@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -337,6 +339,21 @@ func (api *PublicFilterAPI) GetLogs(ctx context.Context, crit FilterCriteria) ([
 		end := rpc.LatestBlockNumber.Int64()
 		if crit.ToBlock != nil {
 			end = crit.ToBlock.Int64()
+		}
+		// I don't love using an environment variable here, but there's not an easy
+		// way to pass a command line flag to here. We'd have to make it a backend
+		// property, which would require modifying the backend interface and
+		// introducing a lot of opportunity for merge conflicts with upstream geth.
+		if logBlockLimit, err := strconv.Atoi(os.Getenv("LOG_BLOCK_LIMIT")); err == nil {
+			if begin == -1 || end == -1 {
+				header, err := api.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+				if err != nil { return nil, err }
+				if begin == -1 { begin = header.Number.Int64() }
+				if end == -1 { end = header.Number.Int64() }
+			}
+			if end - begin > int64(logBlockLimit) {
+				return nil, fmt.Errorf("getLogs block count exceeds limit")
+			}
 		}
 		// Construct the range filter
 		filter = NewRangeFilter(api.backend, begin, end, crit.Addresses, crit.Topics)
