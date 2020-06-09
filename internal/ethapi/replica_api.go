@@ -1,0 +1,40 @@
+package ethapi
+
+import (
+  "context"
+  "math/big"
+  "github.com/ethereum/go-ethereum/common/hexutil"
+  "github.com/ethereum/go-ethereum/rpc"
+
+)
+
+type EtherCattleBlockChainAPI struct {
+  b Backend
+}
+
+
+func NewEtherCattleBlockChainAPI(b Backend) *EtherCattleBlockChainAPI {
+    return &EtherCattleBlockChainAPI{b}
+}
+
+// EstimateGasList returns an estimate of the amount of gas needed to execute list of
+// given transactions against the current pending block.
+func (s *EtherCattleBlockChainAPI) EstimateGasList(ctx context.Context, argsList []CallArgs) ([]hexutil.Uint64, error) {
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	var (
+		gas       hexutil.Uint64
+		err       error
+		stateData *PreviousState
+		gasCap    = s.b.RPCGasCap()
+	)
+	returnVals := make([]hexutil.Uint64, len(argsList))
+	for idx, args := range argsList {
+		gas, stateData, err = DoEstimateGas(ctx, s.b, args, stateData, blockNrOrHash, gasCap)
+		if err != nil {
+			return nil, err
+		}
+		gasCap.Sub(gasCap, new(big.Int).SetUint64(uint64(gas)))
+		returnVals[idx] = gas
+	}
+	return returnVals, nil
+}
