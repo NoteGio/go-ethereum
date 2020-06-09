@@ -803,7 +803,7 @@ func (b *Block) Call(ctx context.Context, args struct {
 			return nil, err
 		}
 	}
-	result, gas, failed, err := ethapi.DoCall(ctx, b.backend, args.Data, *b.numberOrHash, nil, vm.Config{}, 5*time.Second, b.backend.RPCGasCap())
+	result, gas, failed, _, err := ethapi.DoCall(ctx, b.backend, args.Data, nil, *b.numberOrHash, nil, vm.Config{}, 5*time.Second, b.backend.RPCGasCap())
 	status := hexutil.Uint64(1)
 	if failed {
 		status = 0
@@ -824,7 +824,7 @@ func (b *Block) EstimateGas(ctx context.Context, args struct {
 			return hexutil.Uint64(0), err
 		}
 	}
-	gas, err := ethapi.DoEstimateGas(ctx, b.backend, args.Data, *b.numberOrHash, b.backend.RPCGasCap())
+	gas, _, err := ethapi.DoEstimateGas(ctx, b.backend, args.Data, nil, *b.numberOrHash, b.backend.RPCGasCap())
 	return gas, err
 }
 
@@ -869,7 +869,7 @@ func (p *Pending) Call(ctx context.Context, args struct {
 	Data ethapi.CallArgs
 }) (*CallResult, error) {
 	pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	result, gas, failed, err := ethapi.DoCall(ctx, p.backend, args.Data, pendingBlockNr, nil, vm.Config{}, 5*time.Second, p.backend.RPCGasCap())
+	result, gas, failed, _, err := ethapi.DoCall(ctx, p.backend, args.Data, nil, pendingBlockNr, nil, vm.Config{}, 5*time.Second, p.backend.RPCGasCap())
 	status := hexutil.Uint64(1)
 	if failed {
 		status = 0
@@ -885,7 +885,8 @@ func (p *Pending) EstimateGas(ctx context.Context, args struct {
 	Data ethapi.CallArgs
 }) (hexutil.Uint64, error) {
 	pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	return ethapi.DoEstimateGas(ctx, p.backend, args.Data, pendingBlockNr, p.backend.RPCGasCap())
+	gas, _, err := ethapi.DoEstimateGas(ctx, p.backend, args.Data, nil, pendingBlockNr, p.backend.RPCGasCap())
+	return gas, err
 }
 
 // Resolver is the top-level object in the GraphQL hierarchy.

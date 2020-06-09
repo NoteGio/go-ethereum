@@ -118,6 +118,11 @@ func (r *Replica) APIs() []rpc.API {
 			Service:   ethapi.NewPublicTransactionPoolAPI(apiBackend, nonceLock),
 			Public:    true,
 		}, {
+			Namespace: "ethercattle",
+			Version:   "1.0",
+			Service:   ethapi.NewEtherCattleBlockChainAPI(apiBackend),
+			Public:    true,
+		}, {
 			Namespace: "debug",
 			Version:   "1.0",
 			Service:   ethapi.NewPublicDebugAPI(apiBackend),
