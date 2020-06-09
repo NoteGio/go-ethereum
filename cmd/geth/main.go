@@ -226,6 +226,9 @@ func init() {
 		verifyStateTrieCommand,
 		compactCommand,
 		kafkaEventsCommand,
+		stateMigrateCommand,
+		repairMigrationCommand,
+		repairFreezerIndexCommand,
 		// See accountcmd.go:
 		accountCommand,
 		walletCommand,
@@ -246,6 +249,8 @@ func init() {
 		replicaCommand,
 		// See txrelay.go
 		txrelayCommand,
+		freezerDumpCommand,
+		freezerLoadCommand,
 	}
 	sort.Sort(cli.CommandsByName(app.Commands))
 

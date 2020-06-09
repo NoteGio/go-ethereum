@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"time"
 	"math/big"
+	"strings"
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -229,7 +230,13 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 		switch {
 		case freezer == "":
 			freezer = filepath.Join(root, "ancient")
+		case strings.HasPrefix(freezer, "s3://"):
+			log.Info("S3 freezer", "path", freezer)
+		case strings.HasPrefix(freezer, "s3:/"):
+			// For some reason the flags system is dropping the second slash
+			freezer = "s3://" + strings.TrimPrefix(freezer, "s3:/")
 		case !filepath.IsAbs(freezer):
+			log.Info("Non-s3 path", "path", freezer)
 			freezer = sctx.ResolvePath(freezer)
 		}
 		chainDb, err := rawdb.NewDatabaseWithFreezer(chainKv, freezer, "eth/db/chaindata")

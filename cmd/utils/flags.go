@@ -1516,6 +1516,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.DatabaseHandles = makeDatabaseHandles()
 	if ctx.GlobalIsSet(AncientFlag.Name) {
 		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
+		if strings.HasPrefix(cfg.DatabaseFreezer, "s3:/") && !strings.HasPrefix(cfg.DatabaseFreezer, "s3://") {
+			cfg.DatabaseFreezer = "s3://" + strings.TrimPrefix(cfg.DatabaseFreezer, "s3:/")
+		}
+		log.Info("Ancient flag", "value", cfg.DatabaseFreezer)
 	}
 	if ctx.GlobalIsSet(OverlayFlag.Name) {
 		cfg.DatabaseOverlay = ctx.GlobalString(OverlayFlag.Name)

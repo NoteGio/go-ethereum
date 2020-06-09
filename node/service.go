@@ -17,8 +17,10 @@
 package node
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -27,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // ServiceContext is a collection of service independent options inherited from
@@ -94,7 +97,13 @@ func (ctx *ServiceContext) OpenRawDatabaseWithFreezer(name string, cache int, ha
 	switch {
 	case freezer == "":
 		freezer = filepath.Join(root, "ancient")
+	case strings.HasPrefix(freezer, "s3://"):
+		log.Info("S3 freezer", "path", freezer)
+	case strings.HasPrefix(freezer, "s3:/"):
+		freezer = fmt.Sprintf("s3://%v", strings.TrimPrefix(freezer, "s3:/"))
+		log.Info("S3 freezer", "path", freezer)
 	case !filepath.IsAbs(freezer):
+		log.Info("Non-s3 path", "path", freezer)
 		freezer = ctx.Config.ResolvePath(freezer)
 	}
 	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
