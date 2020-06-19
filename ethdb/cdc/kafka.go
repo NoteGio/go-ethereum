@@ -2,6 +2,7 @@ package cdc
 
 import (
   "fmt"
+  "math/rand"
   "github.com/Shopify/sarama"
   "github.com/ethereum/go-ethereum/log"
   "net/url"
@@ -65,6 +66,22 @@ func ParseKafkaURL(brokerURL string) ([]string, *sarama.Config) {
   }
   if parsedURL.Query().Get("idempotent") == "1" {
     config.Producer.Idempotent = true
+  }
+  if parsedURL.Query().Get("avoid_leader") == "1" {
+    config.Consumer.ReplicaSelector = func(topic string, partition int32, client sarama.Client) (*sarama.Broker, error) {
+      leader, err := client.Leader(topic, partition)
+      if err != nil { return nil, err }
+      replicas, err := client.InSyncReplicas(topic, partition)
+      if err != nil { return nil, err }
+      nonleaders := []int32{}
+      for _, id := range replicas {
+        if id != leader.ID() { nonleaders = append(nonleaders, id) }
+      }
+      if len(nonleaders) == 0 { return leader, nil }
+      n := rand.Int31n(int32(len(nonleaders)))
+      return client.Broker(nonleaders[n])
+
+    }
   }
 
   if parsedURL.User != nil {
