@@ -885,6 +885,7 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 			total += len(queue)
 			queue = append(queue[:0], sched.Missing(count)...)
 		}
+		errCh <- nil
 	}()
 
 	return errCh
