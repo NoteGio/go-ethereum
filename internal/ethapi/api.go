@@ -892,6 +892,7 @@ func DoCall(ctx context.Context, b Backend, args CallArgs, prevState *PreviousSt
 	if failed && usedGas >= gas {
 		return res, usedGas, failed, nil, fmt.Errorf("out of gas")
 	}
+	prevState.header.Root = prevState.state.IntermediateRoot(b.ChainConfig().IsEIP158(prevState.header.Number))
 	return res, usedGas, failed, prevState, err
 }
 
