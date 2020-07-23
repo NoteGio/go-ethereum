@@ -228,6 +228,7 @@ type KafkaEventConsumer struct {
   topic string
   ready chan struct{}
   lastEmittedBlock common.Hash
+  latestEmitOffset OffsetHash
 }
 
 func (consumer *KafkaEventConsumer) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscription {
@@ -366,14 +367,14 @@ func (consumer *KafkaEventConsumer) Start() {
         // just want to populate our caches.
         continue
       }
+      if msgType == EmitMsg {
+        consumer.latestEmitOffset = OffsetHash{input.Offset, common.BytesToHash(msg)}
+      }
       if err := consumer.processEvent(msgType, msg); err != nil {
         if input.Offset >= consumer.startingOffset {
           // Don't bother logging errors if we haven't reached the starting offset.
           log.Error("Error processing input:", "err", err, "msgType", msgType, "msg", msg, "offset", input.Offset)
         }
-      }
-      if msgType == EmitMsg {
-        consumer.offsetFeed.Send(OffsetHash{input.Offset, common.BytesToHash(msg)})
       }
     }
   }()
@@ -429,6 +430,7 @@ func (consumer *KafkaEventConsumer) Emit(add []core.ChainEvent, remove []core.Ch
     consumer.chainFeed.Send(newEvent)
     consumer.lastEmittedBlock = newEvent.Hash
   }
+  consumer.offsetFeed.Send(consumer.latestEmitOffset)
 }
 
 func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock common.Hash, offset int64) (EventConsumer, error) {
