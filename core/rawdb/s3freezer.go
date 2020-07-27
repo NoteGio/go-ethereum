@@ -256,8 +256,8 @@ func (f *s3freezer) Sync() error {
 }
 
 func (f *s3freezer) Close() error {
-  close(f.uploadCh)
   f.quit <- struct{}{}
+  close(f.uploadCh)
   return nil
 }
 
