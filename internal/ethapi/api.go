@@ -1052,7 +1052,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *Pre
 		args.Gas = (*hexutil.Uint64)(&gas)
 
 		result, prevS, err := DoCall(ctx, b, args, prevState.copy(), blockNrOrHash, nil, vm.Config{}, 0, gasCap)
-		if prevS != nil {
+		if prevS != nil && !result.Failed() {
 			log.Info("New prevS", "prevS", prevS, "err", err, "result", result)
 			stateData = prevS
 		}
