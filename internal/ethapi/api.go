@@ -1065,7 +1065,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *Pre
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
 		failed, _, err := executable(mid)
-		log.Info("Binsearch", "hi", hi, "mid", mid, "lo", lo, "err", err, "failed", failed)
+		log.Info("Binsearch", "hi", hi, "mid", mid, "lo", lo, "err", err, "failed", failed, "stateData", stateData)
 
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
