@@ -967,7 +967,7 @@ func migrateState(ctx *cli.Context) error {
 		return fmt.Errorf("Source block hash empty")
 	}
 	latestHeaderNumber := rawdb.ReadHeaderNumber(oldDb, latestBlockHash)
-	latestBlock := rawdb.ReadBlock(newDb, latestBlockHash, *latestHeaderNumber)
+	latestBlock := rawdb.ReadBlock(oldDb, latestBlockHash, *latestHeaderNumber)
 
 	log.Info("Syncing genesis block state", "hash", block.Hash(), "root", block.Root())
 	genesisErrCh := syncState(block.Root(), srcDb, newDb)
