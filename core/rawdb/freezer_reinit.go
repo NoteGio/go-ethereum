@@ -17,7 +17,7 @@
 package rawdb
 
 import (
-	"errors"
+	// "errors"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -87,7 +87,9 @@ func InitDatabaseFromFreezer(db ethdb.Database) error {
 		// Retrieve the next result and bail if it's nil
 		block := <-results
 		if block == nil {
-			return errors.New("broken ancient database")
+			log.Warn("Missing block", "i", i)
+			continue
+			// return errors.New("broken ancient database")
 		}
 		// Push the block into the import queue and process contiguous ranges
 		queue.Push(block, -int64(block.NumberU64()))
