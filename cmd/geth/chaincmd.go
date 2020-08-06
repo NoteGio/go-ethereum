@@ -1010,7 +1010,61 @@ func migrateState(ctx *cli.Context) error {
 	ancientErrCh := make(chan error, 1)
 	if os.Getenv("SKIP_INIT_FREEZER") != "true" {
 		go func() {
-			rawdb.InitDatabaseFromFreezer(newDb)
+			it := oldDb.NewIterator([]byte("l"), nil)
+			defer it.Release()
+			batch := newDb.NewBatch()
+			for it.Next() {
+				if err := batch.Put(it.Key(), it.Value()); err != nil {
+					ancientErrCh <- err
+					return
+				}
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						ancientErrCh <- err
+						return
+					}
+					batch.Reset()
+				}
+			}
+			if err := it.Error(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			headerIt := oldDb.NewIterator([]byte("H"), nil)
+			defer headerIt.Release()
+			for headerIt.Next() {
+				if err := batch.Put(headerIt.Key(), headerIt.Value()); err != nil {
+					ancientErrCh <- err
+					return
+				}
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						ancientErrCh <- err
+						return
+					}
+					batch.Reset()
+				}
+			}
+			if err := batch.Write(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			if err := headerIt.Error(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			blockNo, err := newDb.Ancients()
+			if err != nil {
+				ancientErrCh <- err
+				return
+			}
+			hash := rawdb.ReadCanonicalHash(newDb, blockNo)
+
+			rawdb.WriteHeadHeaderHash(newDb, hash)
+			rawdb.WriteHeadFastBlockHash(newDb, hash)
+
+
+			// rawdb.InitDatabaseFromFreezer(newDb)
 			ancientErrCh <- nil
 			log.Info("Initialized from freezer", "elapsed", time.Since(start))
 		}()
@@ -1027,7 +1081,7 @@ func migrateState(ctx *cli.Context) error {
 		return fmt.Errorf("Source block hash empty")
 	}
 	latestHeaderNumber := rawdb.ReadHeaderNumber(oldDb, latestBlockHash)
-	latestBlock := rawdb.ReadBlock(newDb, latestBlockHash, *latestHeaderNumber)
+	latestBlock := rawdb.ReadBlock(oldDb, latestBlockHash, *latestHeaderNumber)
 
 	log.Info("Syncing genesis block state", "hash", block.Hash(), "root", block.Root())
 	genesisErrCh := syncState(block.Root(), srcDb, newDb)
