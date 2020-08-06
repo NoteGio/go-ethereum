@@ -910,6 +910,9 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 					defer wg.Done()
 					for r := range ch {
 						r.data, r.err = srcDb.TrieDB().Node(r.hash)
+						if r.err != nil {
+							log.Warn("Error processing hash", "hash", r.hash, "err", r.err)
+						}
 						popCh <- r
 					}
 				}(&wg)
@@ -926,17 +929,20 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 			}()
 			for r := range popCh {
 				if r.err != nil {
+					log.Crit("trie node error", "err", r.err)
 					errCh <- r.err
 					return
 				}
 				results[r.i] = trie.SyncResult{Hash: r.hash, Data: r.data}
 			}
 			if _, index, err := sched.Process(results); err != nil {
+				log.Crit("trie processing error", "err", err)
 				errCh <- fmt.Errorf("failed to process result #%d: %v", index, err)
 				return
 			}
 			batch := newDb.NewBatch()
 			if err := sched.Commit(batch); err != nil {
+				log.Crit("commit error", "err", err)
 				errCh <- fmt.Errorf("failed to commit data: %v", err)
 				return
 			}
@@ -1010,7 +1016,61 @@ func migrateState(ctx *cli.Context) error {
 	ancientErrCh := make(chan error, 1)
 	if os.Getenv("SKIP_INIT_FREEZER") != "true" {
 		go func() {
-			rawdb.InitDatabaseFromFreezer(newDb)
+			it := oldDb.NewIterator([]byte("l"), nil)
+			defer it.Release()
+			batch := newDb.NewBatch()
+			for it.Next() {
+				if err := batch.Put(it.Key(), it.Value()); err != nil {
+					ancientErrCh <- err
+					return
+				}
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						ancientErrCh <- err
+						return
+					}
+					batch.Reset()
+				}
+			}
+			if err := it.Error(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			headerIt := oldDb.NewIterator([]byte("H"), nil)
+			defer headerIt.Release()
+			for headerIt.Next() {
+				if err := batch.Put(headerIt.Key(), headerIt.Value()); err != nil {
+					ancientErrCh <- err
+					return
+				}
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						ancientErrCh <- err
+						return
+					}
+					batch.Reset()
+				}
+			}
+			if err := batch.Write(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			if err := headerIt.Error(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			blockNo, err := newDb.Ancients()
+			if err != nil {
+				ancientErrCh <- err
+				return
+			}
+			hash := rawdb.ReadCanonicalHash(newDb, blockNo)
+
+			rawdb.WriteHeadHeaderHash(newDb, hash)
+			rawdb.WriteHeadFastBlockHash(newDb, hash)
+
+
+			// rawdb.InitDatabaseFromFreezer(newDb)
 			ancientErrCh <- nil
 			log.Info("Initialized from freezer", "elapsed", time.Since(start))
 		}()
@@ -1027,7 +1087,7 @@ func migrateState(ctx *cli.Context) error {
 		return fmt.Errorf("Source block hash empty")
 	}
 	latestHeaderNumber := rawdb.ReadHeaderNumber(oldDb, latestBlockHash)
-	latestBlock := rawdb.ReadBlock(newDb, latestBlockHash, *latestHeaderNumber)
+	latestBlock := rawdb.ReadBlock(oldDb, latestBlockHash, *latestHeaderNumber)
 
 	log.Info("Syncing genesis block state", "hash", block.Hash(), "root", block.Root())
 	genesisErrCh := syncState(block.Root(), srcDb, newDb)
@@ -1078,8 +1138,14 @@ func migrateState(ctx *cli.Context) error {
 		}
 	}
 
-	if err := <-genesisErrCh; err != nil { return err }
-	if err := <-latestErrCh; err != nil { return err }
+	if err := <-genesisErrCh; err != nil {
+		log.Crit("error syncing genesis")
+		return err
+	}
+	if err := <-latestErrCh; err != nil {
+		log.Crit("error syncing latest")
+		return err
+	}
 	rawdb.WriteHeadBlockHash(newDb, block.Hash())
 	rawdb.WriteHeadHeaderHash(newDb, block.Hash())
 	rawdb.WriteHeadFastBlockHash(newDb, block.Hash())
