@@ -28,7 +28,7 @@ func (s *EtherCattleBlockChainAPI) EstimateGasList(ctx context.Context, argsList
   )
   returnVals := make([]hexutil.Uint64, len(argsList))
   for idx, args := range argsList {
-    gas, stateData, err = DoEstimateGas(ctx, s.b, args, stateData, blockNrOrHash, gasCap)
+    gas, stateData, err = DoEstimateGas(ctx, s.b, args, stateData, blockNrOrHash, gasCap, true)
     if err != nil {
       return nil, err
     }
