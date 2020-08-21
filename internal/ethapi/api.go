@@ -992,7 +992,7 @@ func (e estimateGasError) Error() string {
 	return errMsg
 }
 
-func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *PreviousState, blockNrOrHash rpc.BlockNumberOrHash, gasCap uint64) (hexutil.Uint64, *PreviousState, error) {
+func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *PreviousState, blockNrOrHash rpc.BlockNumberOrHash, gasCap uint64, approx bool) (hexutil.Uint64, *PreviousState, error) {
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
 		lo        uint64 = params.TxGas - 1
@@ -1079,7 +1079,9 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *Pre
 		} else {
 			hi = mid
 		}
+		if approx && (hi - lo) < (hi / 100) { break }
 	}
+	log.Info("Gas estimation complete", "hi", hi, "lo", lo, "mid", (hi + lo) / 2)
 	// Reject the transaction as invalid if it still fails at the highest allowance
 	if hi == cap {
 		failed, result, err := executable(hi)
@@ -1104,7 +1106,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *Pre
 // given transaction against the current pending block.
 func (s *PublicBlockChainAPI) EstimateGas(ctx context.Context, args CallArgs) (hexutil.Uint64, error) {
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	gas, _, err := DoEstimateGas(ctx, s.b, args, nil, blockNrOrHash, s.b.RPCGasCap())
+	gas, _, err := DoEstimateGas(ctx, s.b, args, nil, blockNrOrHash, s.b.RPCGasCap(), false)
 	return gas, err
 }
 
@@ -1576,7 +1578,7 @@ func (args *SendTxArgs) setDefaults(ctx context.Context, b Backend) error {
 			Data:     input,
 		}
 		pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-		estimated, _, err := DoEstimateGas(ctx, b, callArgs, nil, pendingBlockNr, b.RPCGasCap())
+		estimated, _, err := DoEstimateGas(ctx, b, callArgs, nil, pendingBlockNr, b.RPCGasCap(), false)
 		if err != nil {
 			return err
 		}
