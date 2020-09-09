@@ -142,7 +142,7 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, co
     topicDetails := make(map[string]*sarama.TopicDetail)
 
     maxBytes := "5000012"
-    configEntries["message.max.bytes"] = &maxBytes
+    configEntries["max.message.bytes"] = &maxBytes
     replicationFactor := int16(len(client.Brokers()))
     if replicationFactor > 3 {
       // If we have more than 3 brokers, only replicate to 3
@@ -150,6 +150,12 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, co
     }
     if numPartitions <= 0 {
       numPartitions = int32(len(client.Brokers()))
+    }
+
+    numBrokers := int32(len(client.Brokers()))
+    if numPartitions > numBrokers {
+      log.Warn("Too many partitions requested - using numbe of brokers insead for ", topic)
+      numPartitions = numBrokers
     }
     topicDetails[topic] = &sarama.TopicDetail{
       ConfigEntries: configEntries,
@@ -161,12 +167,18 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, co
       Timeout: 5 * time.Second,
       TopicDetails: topicDetails,
     })
+    t := r.TopicErrors
+    for key, val := range t {
+        log.Info("Response key is", "key", key)
+        log.Info("Response Value is", "Value", val.Err.Error())
+        log.Info("Response Value3 is", "Value3", val.ErrMsg)
+    }
     if err != nil {
       log.Error("Error creating topic", "error", err, "response", r)
       return err
     }
     if err, _ := r.TopicErrors[topic]; err != nil && err.Err != sarama.ErrNoError {
-      log.Error("topic error", "err", err)
+      log.Error("topic error", "err", err, "topic", topic)
       return err
     }
     log.Info("Topic created without errors")
