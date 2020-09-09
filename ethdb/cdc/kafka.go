@@ -151,6 +151,12 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, co
     if numPartitions <= 0 {
       numPartitions = int32(len(client.Brokers()))
     }
+
+    numBrokers := int32(len(client.Brokers()))
+    if numPartitions > numBrokers {
+      log.Warn("Too many partitions requested - using numbe of brokers insead for ", topic)
+      numPartitions = numBrokers
+    }
     topicDetails[topic] = &sarama.TopicDetail{
       ConfigEntries: configEntries,
       NumPartitions: numPartitions,
@@ -161,12 +167,18 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, co
       Timeout: 5 * time.Second,
       TopicDetails: topicDetails,
     })
+    t := r.TopicErrors
+    for key, val := range t {
+        log.Info("Key is %s", key)
+        log.Info("Value is %#v", val.Err.Error())
+        log.Info("Value3 is %#v", val.ErrMsg)
+    }
     if err != nil {
       log.Error("Error creating topic", "error", err, "response", r)
       return err
     }
     if err, _ := r.TopicErrors[topic]; err != nil && err.Err != sarama.ErrNoError {
-      log.Error("topic error", "err", err)
+      log.Error("topic error", "err", err, "topic", topic)
       return err
     }
     log.Info("Topic created without errors")
