@@ -1008,30 +1008,52 @@ func repairFreezerIndex(ctx *cli.Context) error {
 }
 
 func repairState(ctx *cli.Context) error {
-	if len(ctx.Args()) < 2 {
-    return fmt.Errorf("Usage: repairstate [oldLeveldb] [newLeveldb]")
+	if len(ctx.Args()) < 3 {
+    return fmt.Errorf("Usage: migrateState [ancients] [oldLeveldb] [newLeveldb] [?kafkaTopic]")
   }
-	oldDb, err := rawdb.NewLevelDBDatabase(ctx.Args()[0], 16, 16, "old")
-	if err != nil {
-		log.Crit("Error old opening database")
-		return err
-	}
-	newDb, err := rawdb.NewLevelDBDatabase(ctx.Args()[1], 16, 16, "new")
+	newDb, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[2], 16, 16, ctx.Args()[0], "new")
 	if err != nil {
 		log.Crit("Error new opening database")
 		return err
 	}
-	srcDb := state.NewDatabase(oldDb)
-	latestBlockHash := rawdb.ReadHeadBlockHash(newDb) // Find the latest blockhash migrated to the new database
-	if len(ctx.Args()) > 2 {
-		latestBlockHash = common.HexToHash(ctx.Args()[2])
+	frozen, err := newDb.Ancients()
+	if err != nil {
+		log.Crit("Error getting ancients")
+		return err
 	}
-	if latestBlockHash == (common.Hash{}) {
-		return fmt.Errorf("Source block hash empty")
+	if frozen == 0 {
+		return fmt.Errorf("Freezer is empty")
 	}
-	latestHeaderNumber := rawdb.ReadHeaderNumber(newDb, latestBlockHash)
-	latestBlock := rawdb.ReadBlock(newDb, latestBlockHash, *latestHeaderNumber)
-	return <-syncState(latestBlock.Root(), srcDb, newDb)
+	oldDb, err := rawdb.NewLevelDBDatabase(ctx.Args()[1], 16, 16, "old")
+	if err != nil {
+		log.Crit("Error old opening database")
+		return err
+	}
+	cliqueIt := oldDb.NewIterator([]byte("clique-"), nil)
+	defer cliqueIt.Release()
+	counter := 0
+	batch := newDb.NewBatch()
+	for cliqueIt.Next() {
+		if len(cliqueIt.Key()) != 7 + common.HashLength { continue } // avoid writing state trie nodes
+		counter++
+		if err := batch.Put(cliqueIt.Key(), cliqueIt.Value()); err != nil {
+			return err
+		}
+		if batch.ValueSize() > ethdb.IdealBatchSize {
+			if err := batch.Write(); err != nil {
+				return err
+			}
+			batch.Reset()
+		}
+	}
+	log.Info("Copied clique records to new db", "count", counter)
+	if err := batch.Write(); err != nil {
+		return err
+	}
+	if err := cliqueIt.Error(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func migrateState(ctx *cli.Context) error {
@@ -1120,6 +1142,33 @@ func migrateState(ctx *cli.Context) error {
 				return
 			}
 			if err := headerIt.Error(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			cliqueIt := oldDb.NewIterator([]byte("clique-"), nil)
+			defer cliqueIt.Release()
+			counter = 0
+			for cliqueIt.Next() {
+				if len(cliqueIt.Key()) != 7 + common.HashLength { continue } // avoid writing state trie nodes
+				counter++
+				if err := batch.Put(cliqueIt.Key(), cliqueIt.Value()); err != nil {
+					ancientErrCh <- err
+					return
+				}
+				if batch.ValueSize() > ethdb.IdealBatchSize {
+					if err := batch.Write(); err != nil {
+						ancientErrCh <- err
+						return
+					}
+					batch.Reset()
+				}
+			}
+			log.Info("Copied clique records to new db", "count", counter)
+			if err := batch.Write(); err != nil {
+				ancientErrCh <- err
+				return
+			}
+			if err := cliqueIt.Error(); err != nil {
 				ancientErrCh <- err
 				return
 			}
