@@ -16,10 +16,10 @@
 
 package main
 
-// import (
-// 	_ "net/http/pprof" // TODO: Disable this
-// 	"net/http"
-// )
+import (
+	_ "net/http/pprof" // TODO: Disable this
+	"net/http"
+)
 
 import (
 	// "fmt"
@@ -153,9 +153,9 @@ system and acts as an RPC node based on the replicated data.
 )
 // replica starts replica node
 func replica(ctx *cli.Context) error {
-	// go func() {
-	// 	log.Info("Serving", "err", http.ListenAndServe("0.0.0.0:6060", nil))
-	// }()
+	go func() {
+		log.Info("Serving", "err", http.ListenAndServe("0.0.0.0:6060", nil))
+	}()
 	node, _ := makeReplicaNode(ctx)
 	utils.StartNode(node)
 	node.Wait()
