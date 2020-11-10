@@ -212,7 +212,7 @@ func (r *Replica) Stop() error {
   return nil
 }
 
-func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, transactionConsumer TransactionConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, evmConcurrency int, warmAddressFile string, enableSnapshot bool) (*Replica, error) {
+func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, transactionProducer TransactionProducer, consumer cdc.LogConsumer, transactionConsumer TransactionConsumer, syncShutdown bool, startupAge, maxOffsetAge, maxBlockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, evmConcurrency int, warmAddressFile string, enableSnapshot bool, maxOffset int64) (*Replica, error) {
   var headChan chan []byte
   quit := make(chan struct{})
   halted := make(chan struct{})
@@ -236,10 +236,21 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   if graphqlEnabled {
     replica.graphql, err = graphql.New(backend, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout)
   }
+  maxOffsetCh := make(chan struct{})
   go func() {
     for {
       select {
       case operation := <-consumer.Messages():
+        if maxOffset > 0 && operation.Offset  > maxOffset {
+          maxOffsetCh <- struct{}{}
+          // Once we've signalled that we've reached the max offset, wait for a
+          // signal on the quit channel, cleanup and shutdown. We don't want to
+          // consume any more messages, but the shutdown process expects this
+          // goroutine to consume from the quit channel.
+          <-quit
+          close(headChan)
+          return
+        }
         head, err := operation.Apply(db)
         if err != nil {
           log.Warn("Error applying operation", "err", err.Error())
@@ -254,10 +265,14 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
       }
     }
   }()
-  if ready := consumer.Ready(); ready != nil {
-    <-ready
+  if ready := consumer.Ready(); ready != nil || maxOffset > 0 {
+    select {
+    case <- consumer.Ready():
+      log.Info("Replica up to date with master")
+    case <- maxOffsetCh:
+      log.Info("Replica reached max offset")
+    }
   }
-  log.Info("Replica up to date with master")
   if syncShutdown {
     log.Info("Replica shutdown after sync flag was set, shutting down")
     quit <- struct{}{}
@@ -276,7 +291,7 @@ func NewReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext,
   return replica, err
 }
 
-func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker, kafkaTopic, transactionTopic, txPoolTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, evmConcurrency int, warmAddressFile string, enableSnapshot bool) (*Replica, error) {
+func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceContext, kafkaSourceBroker, kafkaTopic, transactionTopic, txPoolTopic string, syncShutdown bool, startupAge, offsetAge, blockAge int64, graphqlEnabled bool, graphqlEndpoint string, graphqlCors []string, graphqlVirtualHosts []string, timeout rpc.HTTPTimeouts, evmConcurrency int, warmAddressFile string, enableSnapshot bool, maxOffset int64) (*Replica, error) {
   topicParts := strings.Split(kafkaTopic, ":")
   kafkaTopic = topicParts[0]
   var offset int64
@@ -324,5 +339,5 @@ func NewKafkaReplica(db ethdb.Database, config *eth.Config, ctx *node.ServiceCon
   } else {
     log.Warn("No transaction topic specified. Replica will not have mempool data.")
   }
-  return NewReplica(db, config, ctx, transactionProducer, consumer, transactionConsumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout, evmConcurrency, warmAddressFile, enableSnapshot)
+  return NewReplica(db, config, ctx, transactionProducer, consumer, transactionConsumer, syncShutdown, startupAge, offsetAge, blockAge, graphqlEnabled, graphqlEndpoint, graphqlCors, graphqlVirtualHosts, timeout, evmConcurrency, warmAddressFile, enableSnapshot, maxOffset)
 }

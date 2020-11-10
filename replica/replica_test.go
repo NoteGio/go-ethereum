@@ -16,7 +16,7 @@ func TestReplicaConstants(t *testing.T) {
   db := rawdb.NewMemoryDatabase()
   config := eth.DefaultConfig
   config.Ethash.PowMode = ethash.ModeFake
-  replicaNode, err := NewReplica(db, &config, nil, transactionProducer, consumer, nil, false, 0, 0, 0, false, "", []string{}, []string{}, rpc.HTTPTimeouts{}, 0, "", true)
+  replicaNode, err := NewReplica(db, &config, nil, transactionProducer, consumer, nil, false, 0, 0, 0, false, "", []string{}, []string{}, rpc.HTTPTimeouts{}, 0, "", true, -1)
   if err != nil {
     t.Errorf(err.Error())
   }
@@ -37,7 +37,7 @@ func TestReplicaAPIs(t *testing.T) {
   db := rawdb.NewMemoryDatabase()
   config := eth.DefaultConfig
   config.Ethash.PowMode = ethash.ModeFake
-  replicaNode, err := NewReplica(db, &config, nil, transactionProducer, consumer, nil, false, 0, 0, 0, false, "", []string{}, []string{}, rpc.HTTPTimeouts{}, 0, "", true)
+  replicaNode, err := NewReplica(db, &config, nil, transactionProducer, consumer, nil, false, 0, 0, 0, false, "", []string{}, []string{}, rpc.HTTPTimeouts{}, 0, "", true, -1)
   if err != nil {
     t.Errorf(err.Error())
   }

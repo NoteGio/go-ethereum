@@ -258,6 +258,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, gethConfig) {
 			int(ctx.GlobalInt64(utils.ReplicaEVMConcurrencyFlag.Name)),
 			ctx.GlobalString(utils.ReplicaWarmAddressesFlag.Name),
 			ctx.GlobalBool(utils.SnapshotFlag.Name),
+			ctx.GlobalInt64(utils.ReplicaMaxOffsetFlag.Name),
 		)
 	})
 	return stack, cfg

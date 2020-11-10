@@ -701,6 +701,11 @@ var (
 		 Usage: "If the replica has not received a message in this number of seconds, shut down.",
 		 Value: 0,
 	}
+	ReplicaMaxOffsetFlag = cli.Int64Flag{
+		 Name: "replica.offset.max",
+		 Usage: "The maximum offset to be processed by the replica.",
+		 Value: -1,
+	}
 	ReplicaRuntimeMaxBlockAgeFlag = cli.Int64Flag{
 		 Name: "replica.block.age",
 		 Usage: "If the replica's current block is older than this number of seconds, shut down.",
