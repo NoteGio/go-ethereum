@@ -5,7 +5,7 @@ version: 2.1
 jobs:
   test:
     docker:
-      - image: cimg/go:1.13
+      - image: cimg/go:1.15.4
     steps:
       - checkout
       - run:
@@ -29,9 +29,12 @@ jobs:
       - run:
           name: build image
           command: |
+            sudo apt install wget -y
             export GOPATH=$HOME/go
             export GOARCH=amd64
-            go build ./cmd/geth
+            wget https://golang.org/dl/go1.15.5.linux-amd64.tar.gz
+            tar -xzvf go1.15.5.linux-amd64.tar.gz
+            go/bin/go build ./cmd/geth
       # - run:
       #     name: build image
       #     command: |
