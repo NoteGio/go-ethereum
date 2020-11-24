@@ -46,6 +46,11 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/trie"
 	"gopkg.in/urfave/cli.v1"
+
+	// TODO: Don't merge
+	"net/http"
+	_ "net/http/pprof" // We'll use pprof here
+
 )
 
 var (
@@ -441,6 +446,16 @@ func importChain(ctx *cli.Context) error {
 
 	chain, db := utils.MakeChain(ctx, stack, false)
 	defer db.Close()
+
+	// TODO: Don't merge
+	s := &http.Server{
+		Addr: fmt.Sprintf(":6969"),
+		Handler: http.DefaultServeMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+	go s.ListenAndServe()
+
 
 	if brokerURL := ctx.GlobalString(utils.KafkaLogBrokerFlag.Name); brokerURL != "" {
 		if deltaTopic := ctx.GlobalString(utils.KafkaStateDeltaTopicFlag.Name); deltaTopic != "" {
