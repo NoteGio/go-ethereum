@@ -197,7 +197,6 @@ func (chainEvent *ChainEvent) getMessages() ([]chainEventMessage) {
       if err != nil { panic(err.Error()) }
       logKey := make([]byte, len(logKeyPrefix) + len(logNumberRlp))
       copy(logKey, append(logKeyPrefix, logNumberRlp...))
-      log.Info("Preparing log message", "log", logRecord.Index, "key", logKey)
       result = append(result, chainEventMessage{
         key: logKey,
         value: logBytes,
@@ -323,6 +322,10 @@ func (cet *chainEventTracker) HandleMessage(key, value []byte, partition int32, 
     }
     return cet.HandleReadyCE(blockhash)
   }
+  if !(cet.finished[blockhash] || cet.oldFinished[blockhash]) {
+    log.Info("Waiting to emit", "block", blockhash, "logsRemaining", cet.logCounter[blockhash], "receiptsRemaining", cet.receiptCounter[blockhash])
+  }
+
   return nil, nil
 }
 
@@ -692,7 +695,7 @@ func (consumer *KafkaEventConsumer) Start() {
       // log.Info("Handling message", "offset", input.Offset, "partition", input.Partition, "starting", consumer.startingOffsets[input.Partition])
       chainEvents, err := consumer.cet.HandleMessage(input.Key, input.Value, input.Partition, input.Offset)
       if input.Offset < consumer.startingOffsets[input.Partition] {
-        // log.Info("Offset < starting offset", "offset", input.Offset, "starting", consumer.startingOffsets[input.Partition])
+        log.Info("Offset < starting offset", "offset", input.Offset, "starting", consumer.startingOffsets[input.Partition])
         // If input.Offset < partition.StartingOffset, we're just populating
         // the CET, so we don't need to emit this or worry about errors
         consumer.cet.lastEmittedBlock = common.Hash{} // Set lastEmittedBlock back so it won't get hung up if it doesn't have the whole next block
