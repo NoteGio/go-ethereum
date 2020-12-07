@@ -197,7 +197,6 @@ func (chainEvent *ChainEvent) getMessages() ([]chainEventMessage) {
       if err != nil { panic(err.Error()) }
       logKey := make([]byte, len(logKeyPrefix) + len(logNumberRlp))
       copy(logKey, append(logKeyPrefix, logNumberRlp...))
-      log.Info("Preparing log message", "log", logRecord.Index, "key", logKey)
       result = append(result, chainEventMessage{
         key: logKey,
         value: logBytes,
@@ -323,12 +322,17 @@ func (cet *chainEventTracker) HandleMessage(key, value []byte, partition int32, 
     }
     return cet.HandleReadyCE(blockhash)
   }
+  if !(cet.finished[blockhash] || cet.oldFinished[blockhash]) {
+    log.Info("Waiting to emit", "block", blockhash, "logsRemaining", cet.logCounter[blockhash], "receiptsRemaining", cet.receiptCounter[blockhash])
+  }
+
   return nil, nil
 }
 
 func (cet *chainEventTracker) HandleReadyCE(blockhash common.Hash) (*ChainEvents, error) {
   ce := cet.chainEvents[blockhash]
   if ce.Block.ParentHash() == cet.lastEmittedBlock || cet.lastEmittedBlock == (common.Hash{}) {
+    log.Info("Emitting block without reorg", "block", blockhash)
     return cet.PrepareEmit([]*ChainEvent{ce}, []*ChainEvent{})
   }
   if bh := ce.Block.ParentHash(); !(cet.finished[bh] || cet.oldFinished[bh]) {
@@ -337,11 +341,13 @@ func (cet *chainEventTracker) HandleReadyCE(blockhash common.Hash) (*ChainEvents
     // NOTE: There is a possibility that we're overwriting another child here.
     // That child will still exist in cet.chainEvents, so it can be handled as
     // a reorg if a higher block on that chain eventually comes along.
+    log.Info("Holding until parent is emitted", "block", blockhash, "parent", ce.Block.ParentHash())
     cet.pendingEmits[ce.Block.ParentHash()] = blockhash
     return nil, nil
   }
   lastce := cet.chainEvents[cet.lastEmittedBlock]
   if ce.Td.Cmp(lastce.Td) <= 0 {
+    log.Info("Holding new block because Td is low", "block", blockhash)
     // Don't emit reorgs until there's a block with a higher difficulty
     cet.finished[blockhash] = true
     delete(cet.logCounter, blockhash)
@@ -692,7 +698,7 @@ func (consumer *KafkaEventConsumer) Start() {
       // log.Info("Handling message", "offset", input.Offset, "partition", input.Partition, "starting", consumer.startingOffsets[input.Partition])
       chainEvents, err := consumer.cet.HandleMessage(input.Key, input.Value, input.Partition, input.Offset)
       if input.Offset < consumer.startingOffsets[input.Partition] {
-        // log.Info("Offset < starting offset", "offset", input.Offset, "starting", consumer.startingOffsets[input.Partition])
+        log.Info("Offset < starting offset", "offset", input.Offset, "starting", consumer.startingOffsets[input.Partition])
         // If input.Offset < partition.StartingOffset, we're just populating
         // the CET, so we don't need to emit this or worry about errors
         consumer.cet.lastEmittedBlock = common.Hash{} // Set lastEmittedBlock back so it won't get hung up if it doesn't have the whole next block
