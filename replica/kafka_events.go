@@ -492,19 +492,17 @@ func (producer *KafkaEventProducer) Emit(chainEvent core.ChainEvent) error {
   inflight := 0
   for _, msg := range events {
     // Send events to Kafka or get errors from previous sends
-    select {
-    case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.key), Value: sarama.ByteEncoder(msg.value)}:
-      inflight++
-    case err := <-producer.producer.Errors():
-      return err
-    }
-    // See if there are any successes or errors pending
-    select {
-    case <-producer.producer.Successes():
-      inflight--
-    case err := <-producer.producer.Errors():
-      return err
-    default:
+    SEND_LOOP:
+    for {
+      select {
+      case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.key), Value: sarama.ByteEncoder(msg.value)}:
+        inflight++
+        break SEND_LOOP
+      case <-producer.producer.Successes():
+        inflight--
+      case err := <-producer.producer.Errors():
+        return err
+      }
     }
   }
   // We have `inflight` messages left to send for this event. Make sure we
