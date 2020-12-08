@@ -385,9 +385,12 @@ func (cet *chainEventTracker) PrepareEmit(new, revert []*ChainEvent) (*ChainEven
   }
   if len(new) > 0 {
     cet.lastEmittedBlock = new[len(new) - 1].Block.Hash()
-    cet.finished[cet.lastEmittedBlock] = true
-    delete(cet.logCounter, cet.lastEmittedBlock)
-    delete(cet.receiptCounter, cet.lastEmittedBlock)
+    for _, ce := range new {
+      hash := ce.Block.Hash()
+      cet.finished[hash] = true
+      delete(cet.logCounter, hash)
+      delete(cet.receiptCounter, hash)
+    }
   }
   for hash, ok := cet.pendingEmits[cet.lastEmittedBlock]; ok; hash, ok = cet.pendingEmits[cet.lastEmittedBlock] {
     new = append(new, cet.chainEvents[hash])
@@ -492,19 +495,17 @@ func (producer *KafkaEventProducer) Emit(chainEvent core.ChainEvent) error {
   inflight := 0
   for _, msg := range events {
     // Send events to Kafka or get errors from previous sends
-    select {
-    case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.key), Value: sarama.ByteEncoder(msg.value)}:
-      inflight++
-    case err := <-producer.producer.Errors():
-      return err
-    }
-    // See if there are any successes or errors pending
-    select {
-    case <-producer.producer.Successes():
-      inflight--
-    case err := <-producer.producer.Errors():
-      return err
-    default:
+    SEND_LOOP:
+    for {
+      select {
+      case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.key), Value: sarama.ByteEncoder(msg.value)}:
+        inflight++
+        break SEND_LOOP
+      case <-producer.producer.Successes():
+        inflight--
+      case err := <-producer.producer.Errors():
+        return err
+      }
     }
   }
   // We have `inflight` messages left to send for this event. Make sure we
