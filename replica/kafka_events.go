@@ -235,8 +235,8 @@ func (cet *chainEventTracker) HandleMessage(key, value []byte, partition int32, 
     if sentHash := common.BytesToHash(key[1:]); blockhash != sentHash {
       log.Warn("blockhash != senthash", "calculated", blockhash, "sent", sentHash)
     }
-    cet.finished[block.Hash()] = false // Explicitly setting to false ensures it will be garbage collected if we never see the whole block
     if _, ok := cet.chainEvents[blockhash]; ok { return nil, nil } // We've already seen this block. Ignore
+    cet.finished[block.Hash()] = false // Explicitly setting to false ensures it will be garbage collected if we never see the whole block
     cet.chainEvents[blockhash] = &ChainEvent{
       Block: block,
       ReceiptMeta: make(map[common.Hash]*ReceiptMeta),
@@ -263,6 +263,7 @@ func (cet *chainEventTracker) HandleMessage(key, value []byte, partition int32, 
       cet.chainEvents[blockhash].Td = td
     } else {
       cet.earlyTd[blockhash] = td
+      return nil, nil
     }
   case ReceiptMsg:
     blockhash = common.BytesToHash(key[1:33])
@@ -314,19 +315,19 @@ func (cet *chainEventTracker) HandleMessage(key, value []byte, partition int32, 
     // Last message of block. Emit the chain event on appropriate feeds.
     ce := cet.chainEvents[blockhash]
     if ce == nil || ce.Block.Hash() == cet.lastEmittedBlock {
-      log.Info("Waiting to emit (no block yet)", "block", blockhash)
+      log.Debug("Waiting to emit (no block yet)", "block", blockhash)
       return nil, nil
     }
     if ce.Td == nil {
       // If Td is not set yet, we need to wait for it.
-      log.Info("Waiting to emit (no td yet)", "block", blockhash)
+      log.Debug("Waiting to emit (no td yet)", "block", blockhash)
       return nil, nil
     }
-    log.Info("Proceeding to emit", "block", blockhash)
+    log.Debug("Proceeding to emit", "block", blockhash)
     return cet.HandleReadyCE(blockhash)
   }
   if !(cet.finished[blockhash] || cet.oldFinished[blockhash]) {
-    log.Info("Waiting to emit", "block", blockhash, "logsRemaining", cet.logCounter[blockhash], "receiptsRemaining", cet.receiptCounter[blockhash])
+    log.Debug("Waiting to emit", "block", blockhash, "logsRemaining", cet.logCounter[blockhash], "receiptsRemaining", cet.receiptCounter[blockhash])
   }
 
   return nil, nil
@@ -335,7 +336,7 @@ func (cet *chainEventTracker) HandleMessage(key, value []byte, partition int32, 
 func (cet *chainEventTracker) HandleReadyCE(blockhash common.Hash) (*ChainEvents, error) {
   ce := cet.chainEvents[blockhash]
   if ce.Block.ParentHash() == cet.lastEmittedBlock || cet.lastEmittedBlock == (common.Hash{}) {
-    log.Info("Emitting block without reorg", "block", blockhash)
+    log.Debug("Emitting block without reorg", "block", blockhash)
     return cet.PrepareEmit([]*ChainEvent{ce}, []*ChainEvent{})
   }
   if bh := ce.Block.ParentHash(); !(cet.finished[bh] || cet.oldFinished[bh]) {
@@ -344,13 +345,13 @@ func (cet *chainEventTracker) HandleReadyCE(blockhash common.Hash) (*ChainEvents
     // NOTE: There is a possibility that we're overwriting another child here.
     // That child will still exist in cet.chainEvents, so it can be handled as
     // a reorg if a higher block on that chain eventually comes along.
-    log.Info("Holding until parent is emitted", "block", blockhash, "parent", ce.Block.ParentHash(), "lastEmitted", cet.lastEmittedBlock)
+    log.Debug("Holding until parent is emitted", "finished", cet.finished[bh], "oldFinished", cet.oldFinished[bh], "block", blockhash, "parent", bh, "lastEmitted", cet.lastEmittedBlock)
     cet.pendingEmits[ce.Block.ParentHash()] = blockhash
     return nil, nil
   }
   lastce := cet.chainEvents[cet.lastEmittedBlock]
   if ce.Td.Cmp(lastce.Td) <= 0 {
-    log.Info("Holding new block because Td is low", "block", blockhash)
+    log.Debug("Holding new block because Td is low", "block", blockhash)
     // Don't emit reorgs until there's a block with a higher difficulty
     cet.finished[blockhash] = true
     delete(cet.logCounter, blockhash)
@@ -385,14 +386,19 @@ func (cet *chainEventTracker) PrepareEmit(new, revert []*ChainEvent) (*ChainEven
   }
   if len(new) > 0 {
     cet.lastEmittedBlock = new[len(new) - 1].Block.Hash()
-    cet.finished[cet.lastEmittedBlock] = true
-    delete(cet.logCounter, cet.lastEmittedBlock)
-    delete(cet.receiptCounter, cet.lastEmittedBlock)
+    for _, ce := range new {
+      hash := ce.Block.Hash()
+      log.Debug("Marking block as finished (new)", "blockhash", hash)
+      cet.finished[hash] = true
+      delete(cet.logCounter, hash)
+      delete(cet.receiptCounter, hash)
+    }
   }
   for hash, ok := cet.pendingEmits[cet.lastEmittedBlock]; ok; hash, ok = cet.pendingEmits[cet.lastEmittedBlock] {
     new = append(new, cet.chainEvents[hash])
     delete(cet.pendingEmits, cet.lastEmittedBlock)
     cet.lastEmittedBlock = hash
+    log.Debug("Marking block as finished (pending)", "blockhash", hash)
     cet.finished[hash] = true
   }
   if len(cet.finished) >= cet.finishedLimit {
@@ -492,19 +498,17 @@ func (producer *KafkaEventProducer) Emit(chainEvent core.ChainEvent) error {
   inflight := 0
   for _, msg := range events {
     // Send events to Kafka or get errors from previous sends
-    select {
-    case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.key), Value: sarama.ByteEncoder(msg.value)}:
-      inflight++
-    case err := <-producer.producer.Errors():
-      return err
-    }
-    // See if there are any successes or errors pending
-    select {
-    case <-producer.producer.Successes():
-      inflight--
-    case err := <-producer.producer.Errors():
-      return err
-    default:
+    SEND_LOOP:
+    for {
+      select {
+      case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.key), Value: sarama.ByteEncoder(msg.value)}:
+        inflight++
+        break SEND_LOOP
+      case <-producer.producer.Successes():
+        inflight--
+      case err := <-producer.producer.Errors():
+        return err
+      }
     }
   }
   // We have `inflight` messages left to send for this event. Make sure we
@@ -698,10 +702,10 @@ func (consumer *KafkaEventConsumer) Start() {
   }(&readyWg)
   go func() {
     for input := range messages {
-      // log.Info("Handling message", "offset", input.Offset, "partition", input.Partition, "starting", consumer.startingOffsets[input.Partition])
+      // log.Debug("Handling message", "offset", input.Offset, "partition", input.Partition, "starting", consumer.startingOffsets[input.Partition])
       chainEvents, err := consumer.cet.HandleMessage(input.Key, input.Value, input.Partition, input.Offset)
       if input.Offset < consumer.startingOffsets[input.Partition] {
-        log.Info("Offset < starting offset", "offset", input.Offset, "starting", consumer.startingOffsets[input.Partition])
+        log.Debug("Offset < starting offset", "offset", input.Offset, "starting", consumer.startingOffsets[input.Partition])
         // If input.Offset < partition.StartingOffset, we're just populating
         // the CET, so we don't need to emit this or worry about errors
         consumer.cet.lastEmittedBlock = common.Hash{} // Set lastEmittedBlock back so it won't get hung up if it doesn't have the whole next block

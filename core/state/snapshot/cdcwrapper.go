@@ -72,19 +72,18 @@ func (producer kafkaStateDeltaEmitter) Emit(messages []stateDeltaMessage) error 
   inflight := 0
   for _, msg := range messages {
     // Send messages to Kafka or get errors from previous sends
-    select {
-    case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.Key), Value: sarama.ByteEncoder(msg.Value)}:
-      inflight++
-    case err := <-producer.producer.Errors():
-      return err
-    }
-    // See if there are any successes or errors pending
-    select {
-    case <-producer.producer.Successes():
-      inflight--
-    case err := <-producer.producer.Errors():
-      return err
-    default:
+    SEND_LOOP:
+    for {
+      select {
+      case producer.producer.Input() <- &sarama.ProducerMessage{Topic: producer.topic, Key: sarama.ByteEncoder(msg.Key), Value: sarama.ByteEncoder(msg.Value)}:
+        inflight++
+        break SEND_LOOP
+      case err := <-producer.producer.Errors():
+        return err
+      case <-producer.producer.Successes():
+        inflight--
+      }
+
     }
   }
   for inflight > 0 {
