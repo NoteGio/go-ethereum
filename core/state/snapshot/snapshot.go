@@ -187,7 +187,11 @@ func New(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, root comm
 	// Create a new, empty snapshot tree
 	switch s := diskdb.(type) {
 	case subtabler:
-		if db, err := s.Subtable("snaps"); err != nil { diskdb = db }
+		if db, err := s.Subtable("snaps"); err != nil {
+			diskdb = db
+		} else {
+			log.Warn("Failed to create snaps subtable. Using primary DB for snaps.", "err", err.Error())
+		}
 	default:
 	}
 
