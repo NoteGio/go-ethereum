@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"reflect"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -71,6 +72,23 @@ func (frdb *freezerdb) Freeze(threshold uint64) {
 	<-trigger
 }
 
+type subtabler interface {
+	 Subtable(name string) (ethdb.KeyValueStore, error)
+}
+
+func (frdb *freezerdb) Subtable(name string) (ethdb.KeyValueStore, error) {
+	switch s := frdb.KeyValueStore.(type) {
+	case subtabler:
+		db, err := s.Subtable(name)
+		if err == nil {
+			return &freezerdb{db, frdb.AncientStore}, err
+		}
+		return frdb, err
+	default:
+		return frdb, fmt.Errorf("No subtable support (%v)", reflect.TypeOf(frdb.KeyValueStore))
+	}
+}
+
 // nofreezedb is a database wrapper that disables freezer data retrievals.
 type nofreezedb struct {
 	ethdb.KeyValueStore
@@ -109,6 +127,19 @@ func (db *nofreezedb) TruncateAncients(items uint64) error {
 // Sync returns an error as we don't have a backing chain freezer.
 func (db *nofreezedb) Sync() error {
 	return errNotSupported
+}
+
+func (db *nofreezedb) Subtable(name string) (ethdb.KeyValueStore, error) {
+	switch s := db.KeyValueStore.(type) {
+	case subtabler:
+		sdb, err := s.Subtable(name)
+		if err == nil {
+			return &nofreezedb{sdb}, err
+		}
+		return db, err
+	default:
+		return db, fmt.Errorf("No subtable support (%v)", reflect.TypeOf(db.KeyValueStore))
+	}
 }
 
 // NewDatabase creates a high level database on top of a given key-value data

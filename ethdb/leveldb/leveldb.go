@@ -212,7 +212,7 @@ func (db *Database) Path() string {
 	return db.fn
 }
 
-func (db *Database) Subtable(name string) (*Database, error) {
+	func (db *Database) Subtable(name string) (ethdb.KeyValueStore, error) {
 	return New(path.Join(db.fn, name), minCache * 100, minHandles * 8, name)
 }
 

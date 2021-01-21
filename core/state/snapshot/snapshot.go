@@ -31,6 +31,8 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+
+	"reflect"
 )
 
 var (
@@ -171,7 +173,7 @@ type Tree struct {
 
 
 type subtabler interface {
-	Subtable(string) (ethdb.Database, error)
+	Subtable(string) (ethdb.KeyValueStore, error)
 }
 
 // New attempts to load an already existing snapshot from a persistent key-value
@@ -187,12 +189,11 @@ func New(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, root comm
 	// Create a new, empty snapshot tree
 	switch s := diskdb.(type) {
 	case subtabler:
-		if db, err := s.Subtable("snaps"); err != nil {
-			diskdb = db
-		} else {
-			log.Warn("Failed to create snaps subtable. Using primary DB for snaps.", "err", err.Error())
-		}
+		db, err := s.Subtable("snaps")
+		log.Info("Using subtable for snaps", "db", db, "err", err)
+		diskdb = db
 	default:
+		log.Warn("DB type does not support subtables, using primary", "type", reflect.TypeOf(diskdb))
 	}
 
 	snap := &Tree{
