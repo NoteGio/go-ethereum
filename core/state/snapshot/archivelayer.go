@@ -21,8 +21,8 @@
 package snapshot
 
 import (
+  "errors"
   "fmt"
-  "github.com/VictoriaMetrics/fastcache"
   "github.com/ethereum/go-ethereum/ethdb"
   "github.com/ethereum/go-ethereum/crypto"
   "github.com/ethereum/go-ethereum/common"
@@ -56,6 +56,7 @@ var (
   destructsPrefix = []byte("d")
   accountsPrefix = []byte("a")
   // emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+  KeyMissing = errors.New("Key not found in strand")
 )
 
 type archiveRoot struct {
@@ -77,7 +78,7 @@ type strand struct {
   id common.Hash
 }
 
-func (s *strand) Store(db ethdb.KeyValueStore) error {
+func (s *strand) Store(db ethdb.KeyValueWriter) error {
   data, err := rlp.EncodeToBytes(s)
   if err != nil { return err }
   return db.Put(strandKey(s.id), data)
@@ -112,7 +113,6 @@ func stateValueKey(key common.Hash) []byte{
 
 type archiveStore struct {
   diskdb ethdb.KeyValueStore
-  cache  *fastcache.Cache
   lock   sync.RWMutex
 }
 
@@ -179,7 +179,7 @@ func addKey(reader ethdb.KeyValueReader, writer ethdb.KeyValueWriter, s *strand,
     writer.Put(stateRangesKey(s.id, key, count - 1), data)
   }
   newKeyRange := &strandKeyRange{
-    Lo: s.Head,
+    Lo: s.Head - 1,
     Hi: ^uint64(0),
     Value: crypto.Keccak256Hash(value),
   }
@@ -190,29 +190,30 @@ func addKey(reader ethdb.KeyValueReader, writer ethdb.KeyValueWriter, s *strand,
   return nil
 }
 
-func getKeyStrand(db ethdb.KeyValueReader, rootStrand *strand, key []byte, minHead uint64) ([]byte, error) {
+func getKeyStrand(db ethdb.KeyValueReader, rootStrand *strand, key []byte, number, minHead uint64) ([]byte, error) {
   if rootStrand == nil { return []byte{}, fmt.Errorf("Strand not found") }
   high := getStateCount(db, rootStrand.id, key)
   // Look up the latest value first, then binary search. This adjusts for the high likelihood that the latest value is most likely to be accessed
   n := high - 1
   low := uint64(0)
+  var keyRange *strandKeyRange
+  var err error
+  // fmt.Printf("h: %v, l: %v, n: %v\n", high, low, n)
   for high != low {
-    keyRange, err := getKeyRange(db, rootStrand.id, key, n)
+    keyRange, err = getKeyRange(db, rootStrand.id, key, n)
     if err != nil { return nil, err }
+    // fmt.Printf("id: %#x, h: %v, l: %v, n: %v, krl: %v, krh: %v, mh: %v\n", rootStrand.id, high, low, n, keyRange.Lo, keyRange.Hi, minHead)
     if keyRange.Lo < minHead {
       // If minHead > 0, that indicates we're getting a value for a destructed
       // contract. If this value existed before that contract was destructed, we
       // consider it invalid.
       low = n
     }
-    if keyRange.Lo < n && n < keyRange.Hi {
+    if keyRange.Lo < number && number <= keyRange.Hi {
       return db.Get(stateValueKey(keyRange.Value))
-    } else if n < keyRange.Lo {
+    } else if number < keyRange.Lo {
       if n == low {
-        // Not found in this strand, check the parent strand
-        if rootStrand.ParentStrand != (common.Hash{}) {
-          return getKeyStrand(db, getStrand(db, rootStrand.ParentStrand), key, 0)
-        }
+        break
       }
       low = n
     } else {
@@ -220,13 +221,20 @@ func getKeyStrand(db ethdb.KeyValueReader, rootStrand *strand, key []byte, minHe
     }
     n = (low + high) / 2
   }
-  return []byte{}, fmt.Errorf("Strand not found")
+  // Not found in this strand, check the parent strand
+  if (keyRange == nil || number < keyRange.Lo) && rootStrand.ParentStrand != (common.Hash{}) {
+    // fmt.Printf("Checking parent strand")
+    return getKeyStrand(db, getStrand(db, rootStrand.ParentStrand), key, number, minHead)
+  } // else {
+  //   fmt.Printf("Not checking parent strand. Kr: %v, rs: %v", keyRange, rootStrand.ParentStrand)
+  // }
+  return []byte{}, KeyMissing
 }
 
 func getKey(db ethdb.KeyValueReader, rootHash common.Hash, key []byte) ([]byte, error) {
   root := getRoot(db, rootHash)
   rootStrand := getStrand(db, root.Strand)
-  return getKeyStrand(db, rootStrand, key, 0)
+  return getKeyStrand(db, rootStrand, key, root.Index, 0)
 }
 
 func (as *archiveStore) Update(blockRoot common.Hash, parentRoot common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) error {
@@ -247,6 +255,7 @@ func (as *archiveStore) Update(blockRoot common.Hash, parentRoot common.Hash, de
       // The strand has moved past the parent root, so we're starting a new
       // strand.
       rootStrand.id = crypto.Keccak256Hash(append(parentRoot.Bytes(), blockRoot.Bytes()...))
+      rootStrand.ParentStrand = parentItem.Strand
     }
   } else {
     // New strand off of the empty root
@@ -282,6 +291,7 @@ func (as *archiveStore) Update(blockRoot common.Hash, parentRoot common.Hash, de
     }
   }
   if err := itemRoot.Store(batch); err != nil { return err }
+  if err := rootStrand.Store(batch); err != nil { return err }
   return batch.Write()
 }
 
@@ -313,14 +323,18 @@ func (al *archiveLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 }
 func (al *archiveLayer) Storage(accountHash, storageHash common.Hash) ([]byte, error) {
   destructData, err := getKey(al.store.diskdb, al.root, append(destructsPrefix, accountHash.Bytes()...))
-  if err != nil { return nil, err }
+  if err != nil && err != KeyMissing { return nil, err }
   destructHead := uint64(0)
   if len(destructData) != 0 {
     if err := rlp.DecodeBytes(destructData, &destructHead); err != nil { return nil, err }
   }
   root := getRoot(al.store.diskdb, al.root)
   rootStrand := getStrand(al.store.diskdb, root.Strand)
-  return getKeyStrand(al.store.diskdb, rootStrand, storageHash.Bytes(), destructHead)
+  return getKeyStrand(al.store.diskdb, rootStrand, append(accountHash.Bytes(), storageHash.Bytes()...), root.Index, destructHead)
+}
+
+func (al *archiveLayer) Update(blockRoot, parentRoot common.Hash, destructs map[common.Hash]struct{}, accounts map[common.Hash][]byte, storage map[common.Hash]map[common.Hash][]byte) error {
+  return al.store.Update(blockRoot, parentRoot, destructs, accounts, storage)
 }
 //   Snapshot
 //   Parent() snapshot
