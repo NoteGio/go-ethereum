@@ -814,7 +814,7 @@ type PreviousState struct {
 	state  *state.StateDB
 	header *types.Header
 }
-func (prevState *PreviousState) copy() *PreviousState {
+func (prevState *PreviousState) Copy() *PreviousState {
 	if prevState == nil { return nil }
 	state := prevState.state
 	if state != nil { state = state.Copy() }
@@ -822,6 +822,24 @@ func (prevState *PreviousState) copy() *PreviousState {
 		state: state,
 		header: prevState.header,
 	}
+}
+
+func (prevState *PreviousState) AccessList() *types.AccessList {
+	return prevState.state.AccessList()
+}
+
+func (prevState *PreviousState) Prepare(thash, bhash common.Hash, ti int) {
+	prevState.state.Prepare(thash, bhash, ti)
+}
+
+func (prevState *PreviousState) GetLogs(thash common.Hash) []*types.Log {
+	return prevState.state.GetLogs(thash)
+}
+
+func (prevState *PreviousState) Init(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrHash) error {
+	var err error
+	prevState.state, prevState.header, err = b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	return err
 }
 
 func DoCall(ctx context.Context, b Backend, args CallArgs, prevState *PreviousState, blockNrOrHash rpc.BlockNumberOrHash, overrides map[common.Address]account, vmCfg vm.Config, timeout time.Duration, globalGasCap uint64) (*core.ExecutionResult, *PreviousState, error) {
@@ -1055,7 +1073,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args CallArgs, prevState *Pre
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, prevS, err := DoCall(ctx, b, args, prevState.copy(), blockNrOrHash, nil, vm.Config{}, 0, gasCap)
+		result, prevS, err := DoCall(ctx, b, args, prevState.Copy(), blockNrOrHash, nil, vm.Config{}, 0, gasCap)
 		if prevS != nil && !result.Failed() {
 			stateData = prevS
 		}
