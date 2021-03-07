@@ -44,30 +44,33 @@ func (s *EtherCattleBlockChainAPI) EstimateGasList(ctx context.Context, argsList
 
 
 type CallDetails struct {
+  Args *CallArgs `json:"args,omitempty"`
   Result interface{} `json:"result,omitempty"`
   Logs []*types.Log `json:"logs,omitempty"`
-  Gas *hexutil.Uint64 `json:"gas,omitempty"`
-  Accesses *types.AccessList `json:"accessList,omitempty"`
   Error error `json:"error,omitempty"`
 }
 
 // CallDetailsList runs a list of calls in succession, returning the result,
 // access list, and gas of each call.
-func (s *EtherCattleBlockChainAPI) CallDetailsList(ctx context.Context, argsList []CallArgs, blockNrOrHash rpc.BlockNumberOrHash) ([]CallDetails, error) {
+func (s *EtherCattleBlockChainAPI) CallDetailsList(ctx context.Context, argsList []CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, estimateGas *bool) ([]CallDetails, error) {
   var (
     gas       hexutil.Uint64
     stateData *PreviousState
     gasCap    = s.b.RPCGasCap()
   )
+  if blockNrOrHash == nil {
+    pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+    blockNrOrHash = &pending
+  }
   stateData = &PreviousState{}
-  if err := stateData.Init(ctx, s.b, blockNrOrHash); err != nil {
+  if err := stateData.Init(ctx, s.b, *blockNrOrHash); err != nil {
     return []CallDetails{}, err
   }
   returnVals := make([]CallDetails, len(argsList))
   for idx, args := range argsList {
     thash := common.BytesToHash([]byte{byte(idx)})
     stateData.Prepare(thash, common.Hash{}, idx)
-    result, _, err := DoCall(ctx, s.b, args, stateData.Copy(), blockNrOrHash, nil, vm.Config{}, 5 * time.Second, gasCap)
+    result, doCallState, err := DoCall(ctx, s.b, args, stateData.Copy(), *blockNrOrHash, nil, vm.Config{}, 5 * time.Second, gasCap)
 
     if err != nil {
       returnVals[idx] = CallDetails{Error: err}
@@ -78,18 +81,24 @@ func (s *EtherCattleBlockChainAPI) CallDetailsList(ctx context.Context, argsList
       returnVals[idx] = CallDetails{Error: newRevertError(result)}
       continue
     }
-    gas, stateData, err = DoEstimateGas(ctx, s.b, args, stateData, blockNrOrHash, gasCap, true)
-    if err != nil {
-      returnVals[idx] = CallDetails{Error: err}
-      continue
-    }
-    gasCap -= uint64(gas)
+    args.AccessList = doCallState.AccessList()
     returnVals[idx] = CallDetails{
       Result: result.Return(),
       Logs: stateData.GetLogs(thash),
-      Gas: &gas,
-      Accesses: stateData.AccessList(),
+      Args: &args,
       Error: result.Err,
+    }
+    if estimateGas != nil && *estimateGas {
+      gas, stateData, err = DoEstimateGas(ctx, s.b, args, stateData, *blockNrOrHash, gasCap, true)
+      if err != nil {
+        returnVals[idx] = CallDetails{Error: err}
+        continue
+      }
+      gasCap -= uint64(gas)
+      args.Gas = &gas
+    } else {
+      stateData = doCallState
+      gasCap -= result.UsedGas
     }
   }
   return returnVals, nil

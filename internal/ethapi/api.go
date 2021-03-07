@@ -751,11 +751,11 @@ func (s *PublicBlockChainAPI) GetStorageAt(ctx context.Context, address common.A
 type CallArgs struct {
 	From       *common.Address   `json:"from"`
 	To         *common.Address   `json:"to"`
-	Gas        *hexutil.Uint64   `json:"gas"`
-	GasPrice   *hexutil.Big      `json:"gasPrice"`
-	Value      *hexutil.Big      `json:"value"`
-	Data       *hexutil.Bytes    `json:"data"`
-	AccessList *types.AccessList `json:"accessList"`
+	Gas        *hexutil.Uint64   `json:"gas,omitempty"`
+	GasPrice   *hexutil.Big      `json:"gasPrice,omitempty"`
+	Value      *hexutil.Big      `json:"value,omitempty"`
+	Data       *hexutil.Bytes    `json:"data,omitempty"`
+	AccessList *types.AccessList `json:"accessList,omitempty"`
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
