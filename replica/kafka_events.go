@@ -417,7 +417,7 @@ func (cet *chainEventTracker) HandleReadyCE(blockhash common.Hash) (*ChainEvents
   if bh := ce.Block.ParentHash(); !(cet.finished[bh] || cet.oldFinished[bh]) {
     // The parent has not been emitted, save for later.
 
-    log.Debug("Holding until parent is emitted", "finished", cet.finished[bh], "oldFinished", cet.oldFinished[bh], "block", blockhash, "parent", bh, "lastEmitted", cet.lastEmittedBlock)
+    log.Debug("Holding until parent is emitted", "finished", cet.finished[bh], "oldFinished", cet.oldFinished[bh], "block", blockhash, "number", ce.Block.NumberU64(), "parent", bh, "lastEmitted", cet.lastEmittedBlock)
     ph := ce.Block.ParentHash()
     if _, ok := cet.pendingEmits[ph]; !ok {
       cet.pendingEmits[ph] = make(map[common.Hash]struct{})
@@ -865,6 +865,16 @@ func (consumer *KafkaEventConsumer) Start() {
         if chainEvents != nil {
           consumer.feed.Send(chainEvents)
         }
+      case <-dl.Reset(5 * time.Second):
+        // Reset the drumline if we got no messages at all in a 5 second
+        // period. This will be a no-op if the drumline is closed. Resetting if
+        // we don't get any messages for five second should be safe, as the
+        // purpose of the drumline here is to ensure no single partition gets
+        // too far ahead of the others; if there are no messages being produced
+        // by any of them, either there are no messages at all, or there are no
+        // messages because the drumline has gotten streteched too far apart in
+        // the course of normal operation, and it should be reset.
+        log.Debug("Drumline reset")
       case v := <- readyWaiter():
         // readyWaiter() will wait 1 second if readych is ready to receive ,
         // which will trigger a message to get sent on consumer.ready. This
