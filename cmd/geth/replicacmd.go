@@ -145,7 +145,7 @@ system and acts as an RPC node based on the replicated data.
 		DataDir:          node.DefaultDataDir(),
 		// HTTPHost:         "0.0.0.0",
 		// HTTPPort:         node.DefaultHTTPPort,
-		HTTPModules:      []string{"net", "web3", "replica"},
+		HTTPModules:      []string{"net", "web3", "ethercattle", "eth"},
 		HTTPVirtualHosts: []string{"*"},
 		WSPort:           node.DefaultWSPort,
 		WSModules:        []string{"net", "web3"},
