@@ -29,12 +29,14 @@ jobs:
       - run:
           name: build image
           command: |
-            sudo apt install wget -y
+            sudo apt update
+            sudo apt install gcc-aarch64-linux-gnu libc6-dev-arm64-cross wget -y
             export GOPATH=$HOME/go
             export GOARCH=amd64
             wget https://golang.org/dl/go1.15.5.linux-amd64.tar.gz
             tar -xzvf go1.15.5.linux-amd64.tar.gz
-            go/bin/go build ./cmd/geth
+            go/bin/go build -o geth-amd64 ./cmd/geth
+            CC=aarch64-linux-gnu-gcc -o geth-arm64 CGO_ENABLED=1 GOARCH=arm64  go/bin/go build ./cmd/geth
       # - run:
       #     name: build image
       #     command: |
@@ -46,7 +48,10 @@ jobs:
           aws-region: AWS_REGION
       - run:
           name: push to s3
-          command: aws s3 cp ./geth s3://ethercattle-binaries/$CIRCLE_TAG/geth-linux-amd64 --acl=public-read
+          command: aws s3 cp ./geth-amd64 s3://ethercattle-binaries/$CIRCLE_TAG/geth-linux-amd64 --acl=public-read
+      - run:
+          name: push to s3
+          command: aws s3 cp ./geth-arm64 s3://ethercattle-binaries/$CIRCLE_TAG/geth-linux-arm64 --acl=public-read
       - run:
           name: Message Slack
           command: |
