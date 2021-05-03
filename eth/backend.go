@@ -121,8 +121,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
+	// Transfer mining-related config to the ethash config.
+	ethashConfig := config.Ethash
+	ethashConfig.NotifyFull = config.Miner.NotifyFull
+
 	// Assemble the Ethereum object
-	chainDb, err := stack.OpenDatabaseWithOverlayAndFreezer("chaindata", config.DatabaseCache * 3/4, config.DatabaseCache/4, config.DatabaseHandles, config.DatabaseFreezer, config.DatabaseOverlay, "eth/db/chaindata/")
+	chainDb, err := stack.OpenDatabaseWithOverlayAndFreezer("chaindata", config.DatabaseCache * 3/4, config.DatabaseCache/4, config.DatabaseHandles, config.DatabaseFreezer, config.DatabaseOverlay, "eth/db/chaindata/", false)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +144,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainDb:           chainDb,
 		eventMux:          stack.EventMux(),
 		accountManager:    stack.AccountManager(),
-		engine:            ethconfig.CreateConsensusEngine(stack, chainConfig, &config.Ethash, config.Miner.Notify, config.Miner.Noverify, chainDb),
+		engine:            ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkId,
 		gasPrice:          config.Miner.GasPrice,

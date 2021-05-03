@@ -202,7 +202,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, ethapi.Backend, error) {
 	log.Info("Opening leveldb")
 	var chainKv ethdb.KeyValueStore
 	log.Info("Allocating DB", "path", stack.ResolvePath("chaindata"), "dbcache", cfg.Eth.DatabaseCache, "handles", cfg.Eth.DatabaseHandles)
-	chainKv, err = rawdb.NewLevelDBDatabase(stack.ResolvePath("chaindata"), cfg.Eth.DatabaseCache * 3 / 4, cfg.Eth.DatabaseHandles, "eth/db/chaindata")
+	chainKv, err = rawdb.NewLevelDBDatabase(stack.ResolvePath("chaindata"), cfg.Eth.DatabaseCache * 3 / 4, cfg.Eth.DatabaseHandles, "eth/db/chaindata", false)
 	// chainKv, err := stack.OpenRawDatabaseWithFreezer("chaindata", cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, cfg.Eth.DatabaseFreezer, "eth/db/chaindata/")
 	if err != nil {
 		utils.Fatalf("Could not open database: %v", err)
@@ -217,7 +217,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, ethapi.Backend, error) {
 			overlayKv = memorydb.New()
 		} else {
 			log.Info("Cache size", "dbcache", cfg.Eth.DatabaseCache)
-			overlayKv, err = rawdb.NewLevelDBDatabase(cfg.Eth.DatabaseOverlay, cfg.Eth.DatabaseCache * 1 / 4, cfg.Eth.DatabaseHandles, "eth/db/chaindata/overlay/")
+			overlayKv, err = rawdb.NewLevelDBDatabase(cfg.Eth.DatabaseOverlay, cfg.Eth.DatabaseCache * 1 / 4, cfg.Eth.DatabaseHandles, "eth/db/chaindata/overlay/", false)
 		}
 		if err != nil {
 			utils.Fatalf("Failed to create overlaydb", err)
@@ -239,7 +239,7 @@ func makeReplicaNode(ctx *cli.Context) (*node.Node, ethapi.Backend, error) {
 		log.Info("Non-s3 path", "path", freezer)
 		freezer = stack.ResolvePath(freezer)
 	}
-	chainDb, err := rawdb.NewDatabaseWithFreezer(chainKv, freezer, "eth/db/chaindata")
+	chainDb, err := rawdb.NewDatabaseWithFreezer(chainKv, freezer, "eth/db/chaindata", false)
 	if err != nil {
 		utils.Fatalf("Could not open freezer: %v", err)
 	}

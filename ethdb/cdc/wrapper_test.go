@@ -179,7 +179,7 @@ func TestBatchWrapper(t *testing.T) {
     t.Errorf("No messages expected yet")
   default:
   }
-  if size := batch.ValueSize(); size != 11 {
+  if size := batch.ValueSize(); size != 14 {
     t.Errorf("Unexpected value size %v", size)
   }
   go batch.Write()
