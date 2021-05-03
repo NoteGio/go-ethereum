@@ -5,7 +5,9 @@ import (
   "github.com/ethereum/go-ethereum/eth/ethconfig"
   "github.com/ethereum/go-ethereum/core/rawdb"
   "github.com/ethereum/go-ethereum/ethdb/cdc"
+  "github.com/ethereum/go-ethereum/p2p"
   "github.com/ethereum/go-ethereum/rpc"
+  "github.com/ethereum/go-ethereum/node"
   "testing"
 )
 
@@ -16,7 +18,20 @@ func TestReplicaConstants(t *testing.T) {
   db := rawdb.NewMemoryDatabase()
   config := ethconfig.Defaults
   config.Ethash.PowMode = ethash.ModeFake
-  replicaNode, err := NewReplica(db, &config, nil, transactionProducer, consumer, nil, false, 0, 0, 0, rpc.HTTPTimeouts{}, 0, "", true, -1)
+
+  stack, _ := node.New(&node.Config{
+		DataDir:          node.DefaultDataDir(),
+		// HTTPHost:         "0.0.0.0",
+		// HTTPPort:         node.DefaultHTTPPort,
+		HTTPModules:      []string{"net", "web3", "replica"},
+		HTTPVirtualHosts: []string{"*"},
+		WSPort:           node.DefaultWSPort,
+		WSModules:        []string{"net", "web3"},
+		P2P: p2p.Config{},
+	})
+  defer stack.Close()
+
+  replicaNode, err := NewReplica(db, &config, stack, transactionProducer, consumer, nil, false, 0, 0, 0, rpc.HTTPTimeouts{}, 0, "", true, -1)
   if err != nil {
     t.Errorf(err.Error())
   }
@@ -37,7 +52,18 @@ func TestReplicaAPIs(t *testing.T) {
   db := rawdb.NewMemoryDatabase()
   config := ethconfig.Defaults
   config.Ethash.PowMode = ethash.ModeFake
-  replicaNode, err := NewReplica(db, &config, nil, transactionProducer, consumer, nil, false, 0, 0, 0, rpc.HTTPTimeouts{}, 0, "", true, -1)
+  stack, _ := node.New(&node.Config{
+    DataDir:          node.DefaultDataDir(),
+    // HTTPHost:         "0.0.0.0",
+    // HTTPPort:         node.DefaultHTTPPort,
+    HTTPModules:      []string{"net", "web3", "replica"},
+    HTTPVirtualHosts: []string{"*"},
+    WSPort:           node.DefaultWSPort,
+    WSModules:        []string{"net", "web3"},
+    P2P: p2p.Config{},
+  })
+  defer stack.Close()
+  replicaNode, err := NewReplica(db, &config, stack, transactionProducer, consumer, nil, false, 0, 0, 0, rpc.HTTPTimeouts{}, 0, "", true, -1)
   if err != nil {
     t.Errorf(err.Error())
   }

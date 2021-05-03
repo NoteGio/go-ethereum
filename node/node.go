@@ -551,7 +551,7 @@ func (n *Node) EventMux() *event.TypeMux {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string, cache, handles int, namespace string) (ethdb.Database, error) {
+func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, readonly bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -563,7 +563,7 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string) (
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
 	} else {
-		db, err = rawdb.NewLevelDBDatabase(n.ResolvePath(name), cache, handles, namespace)
+		db, err = rawdb.NewLevelDBDatabase(n.ResolvePath(name), cache, handles, namespace, readonly)
 	}
 
  if n.config.KafkaLogBroker != "" && n.config.KafkaLogTopic != "" {
@@ -582,10 +582,10 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string) (
 	return db, err
 }
 
-func (n *Node) OpenDatabaseWithOverlayAndFreezer(name string, underlayCache, overlayCache, handles int, freezer, overlayPath, namespace string) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithOverlayAndFreezer(name string, underlayCache, overlayCache, handles int, freezer, overlayPath, namespace string, readonly bool) (ethdb.Database, error) {
 	var chainKv ethdb.KeyValueStore
 	var err error
-	chainKv, err = rawdb.NewLevelDBDatabase(n.config.ResolvePath(name), underlayCache, handles, namespace)
+	chainKv, err = rawdb.NewLevelDBDatabase(n.config.ResolvePath(name), underlayCache, handles, namespace, readonly)
 	// chainKv, err := sctx.OpenRawDatabaseWithFreezer("chaindata", cfg.Eth.DatabaseCache, cfg.Eth.DatabaseHandles, freezer, "eth/db/chaindata/")
 	if err != nil { return nil, err  }
 	if overlayPath != "" {
@@ -598,7 +598,7 @@ func (n *Node) OpenDatabaseWithOverlayAndFreezer(name string, underlayCache, ove
 			overlayKv = memorydb.New()
 		} else {
 			log.Info("Cache size", "dbcache", overlayCache)
-			overlayKv, err = rawdb.NewLevelDBDatabase(overlayPath, overlayCache, handles, "eth/db/chaindata/overlay")
+			overlayKv, err = rawdb.NewLevelDBDatabase(overlayPath, overlayCache, handles, "eth/db/chaindata/overlay", readonly)
 		}
 		if err != nil {
 			return nil, err
@@ -619,7 +619,7 @@ func (n *Node) OpenDatabaseWithOverlayAndFreezer(name string, underlayCache, ove
 		log.Info("Non-s3 path", "path", freezer)
 		freezer = n.config.ResolvePath(freezer)
 	}
-	db, err := rawdb.NewDatabaseWithFreezer(chainKv, freezer, "eth/db/chaindata")
+	db, err := rawdb.NewDatabaseWithFreezer(chainKv, freezer, "eth/db/chaindata", readonly)
 	if err != nil { return nil, err }
 	if n.config.KafkaLogBroker != "" && n.config.KafkaLogTopic != ""{
     producer, err := cdc.NewKafkaLogProducerFromURL(
@@ -638,7 +638,7 @@ func (n *Node) OpenDatabaseWithOverlayAndFreezer(name string, underlayCache, ove
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer, namespace string) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer, namespace string, readonly bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -663,7 +663,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer,
 			log.Info("Non-s3 path", "path", freezer)
 			freezer = n.ResolvePath(freezer)
 		}
-		db, err = rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
+		db, err = rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace, readonly)
 	}
   if n.config.KafkaLogBroker != "" && n.config.KafkaLogTopic != "" {
     producer, err := cdc.NewKafkaLogProducerFromURL(

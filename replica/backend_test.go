@@ -280,7 +280,7 @@ func TestGetEVM(t *testing.T) {
     t.Fatalf(err.Error())
   }
   ctx, _ := context.WithTimeout(context.Background(), 5 * time.Millisecond)
-  evm, vmErr, err := backend.GetEVM(ctx, msg, state, header)
+  evm, vmErr, err := backend.GetEVM(ctx, msg, state, header, &vm.Config{})
   if err != nil {
     t.Fatalf(err.Error())
   }
