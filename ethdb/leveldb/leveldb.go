@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"path"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -238,6 +239,10 @@ func (db *Database) Compact(start []byte, limit []byte) error {
 // Path returns the path to the database directory.
 func (db *Database) Path() string {
 	return db.fn
+}
+
+func (db *Database) Subtable(name string) (*Database, error) {
+	return New(path.Join(db.fn, name), minCache * 100, minHandles * 8, name)
 }
 
 // meter periodically retrieves internal leveldb counters and reports them to
