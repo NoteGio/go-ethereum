@@ -743,7 +743,7 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 	errCh := make(chan error)
 	go func() {
 		count := 10000
-		sched := state.NewStateSync(root, newDb, trie.NewSyncBloom(1, newDb))
+		sched := state.NewStateSync(root, newDb, trie.NewSyncBloom(1, newDb), nil)
 		log.Info("Syncing", "root", root)
 		missingNodes, _, missingCodes := sched.Missing(count)
 		nodeQueue := append([]common.Hash{}, missingNodes...)

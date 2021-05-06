@@ -154,6 +154,7 @@ var (
 		utils.EVMInterpreterFlag,
 		utils.MinerNotifyFullFlag,
 		configFileFlag,
+		utils.CatalystFlag,
 		utils.KafkaLogBrokerFlag,
 		utils.KafkaLogTopicFlag,
 		utils.KafkaEventTopicFlag,

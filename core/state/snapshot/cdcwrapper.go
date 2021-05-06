@@ -107,13 +107,14 @@ func KafkaCDCTree(tree SnapshotTree, producer sarama.AsyncProducer, topic string
 
 type SnapshotTree interface {
   Journal(common.Hash) (common.Hash, error)
-  LegacyJournal(common.Hash) (common.Hash, error)
+  // LegacyJournal(common.Hash) (common.Hash, error)
   Rebuild(common.Hash)
   AccountIterator(common.Hash, common.Hash) (AccountIterator, error)
   StorageIterator(common.Hash, common.Hash, common.Hash) (StorageIterator, error)
   Snapshot(common.Hash) Snapshot
   Update(common.Hash, common.Hash, map[common.Hash]struct{}, map[common.Hash][]byte, map[common.Hash]map[common.Hash][]byte) error
   Cap(common.Hash, int) error
+  Disable()
 }
 
 type CDCTree struct {
@@ -127,11 +128,11 @@ func (t *CDCTree) Journal(root common.Hash) (common.Hash, error) {
   return common.Hash{}, nil
 }
 
-func (t *CDCTree) LegacyJournal(root common.Hash) (common.Hash, error) {
-  t.emitter.Flush()
-  if t.tree != nil { return t.tree.LegacyJournal(root) }
-  return common.Hash{}, nil
-}
+// func (t *CDCTree) LegacyJournal(root common.Hash) (common.Hash, error) {
+//   t.emitter.Flush()
+//   if t.tree != nil { return t.tree.LegacyJournal(root) }
+//   return common.Hash{}, nil
+// }
 
 func (t *CDCTree) Rebuild(root common.Hash) {
   if t.tree != nil { t.tree.Rebuild(root) }
@@ -223,6 +224,10 @@ func (t *CDCTree) Update(blockRoot common.Hash, parentRoot common.Hash, destruct
 func (t *CDCTree) Cap(root common.Hash, layers int) error {
   if t.tree != nil { return t.tree.Cap(root, layers) }
   return nil
+}
+
+func (t *CDCTree) Disable() {
+  if t.tree != nil { t.tree.Disable() }
 }
 
 type CDCSnapshot struct {
