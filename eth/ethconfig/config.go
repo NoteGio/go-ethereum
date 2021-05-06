@@ -154,6 +154,7 @@ type Config struct {
 	DatabaseCache      int
 	DatabaseFreezer    string
 	DatabaseOverlay    string
+	DatabaseSnaps      string
 
 	TrieCleanCache          int
 	TrieCleanCacheJournal   string        `toml:",omitempty"` // Disk journal directory for trie cache to survive node restarts

@@ -170,10 +170,6 @@ type Tree struct {
 }
 
 
-type subtabler interface {
-	Subtable(string) (ethdb.Database, error)
-}
-
 // New attempts to load an already existing snapshot from a persistent key-value
 // store (with a number of memory layers from a journal), ensuring that the head
 // of the snapshot matches the expected one.
@@ -185,12 +181,6 @@ type subtabler interface {
 // iff it's in "recovery" mode, otherwise rebuild is mandatory.
 func New(diskdb ethdb.KeyValueStore, triedb *trie.Database, cache int, root common.Hash, async bool, rebuild bool, recovery bool) (*Tree, error) {
 	// Create a new, empty snapshot tree
-	switch s := diskdb.(type) {
-	case subtabler:
-		if db, err := s.Subtable("snaps"); err != nil { diskdb = db }
-	default:
-	}
-
 	snap := &Tree{
 		diskdb: diskdb,
 		triedb: triedb,

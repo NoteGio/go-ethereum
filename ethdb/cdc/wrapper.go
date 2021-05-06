@@ -216,6 +216,14 @@ func (db *DBWrapper) NewIterator(start, end []byte) ethdb.Iterator {
   return db.db.NewIterator(start, end)
 }
 
+func (db *DBWrapper) Subtable(name string) (ethdb.KeyValueStore, error) {
+  if subtabler, ok := db.db.(ethdb.Subtabler); ok {
+    // We don't wrap the subtable
+    return subtabler.Subtable(name)
+  }
+	return db, nil
+}
+
 func NewDBWrapper(db ethdb.Database, writeStream, readStream LogProducer) ethdb.Database {
   return &DBWrapper{db, writeStream, readStream}
 }

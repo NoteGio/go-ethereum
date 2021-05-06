@@ -129,3 +129,7 @@ type Database interface {
 	Compacter
 	io.Closer
 }
+
+type  Subtabler interface {
+	Subtable(string) (KeyValueStore, error)
+}

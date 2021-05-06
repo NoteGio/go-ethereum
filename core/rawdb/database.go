@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"reflect"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -75,6 +76,13 @@ func (frdb *freezerdb) Freeze(threshold uint64) error {
 	return nil
 }
 
+func (frdb *freezerdb) Subtable(path string) (ethdb.KeyValueStore, error) {
+	if subtabler, ok := frdb.KeyValueStore.(ethdb.Subtabler); ok {
+		return subtabler.Subtable(path)
+	}
+	return frdb, fmt.Errorf("KeyValueStore is not a subtabler", "type", reflect.TypeOf(frdb.KeyValueStore))
+}
+
 // nofreezedb is a database wrapper that disables freezer data retrievals.
 type nofreezedb struct {
 	ethdb.KeyValueStore
@@ -121,6 +129,13 @@ func NewDatabase(db ethdb.KeyValueStore) ethdb.Database {
 	return &nofreezedb{
 		KeyValueStore: db,
 	}
+}
+
+func (db *nofreezedb) Subtable(path string) (ethdb.KeyValueStore, error) {
+	if subtabler, ok := db.KeyValueStore.(ethdb.Subtabler); ok {
+		return subtabler.Subtable(path)
+	}
+	return db, fmt.Errorf("KeyValueStore is not a subtabler", "type", reflect.TypeOf(db.KeyValueStore))
 }
 
 // NewDatabaseWithFreezer creates a high level database on top of a given key-

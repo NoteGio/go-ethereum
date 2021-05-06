@@ -129,6 +129,7 @@ type CacheConfig struct {
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
 	SnapshotLimit       int           // Memory allowance (MB) to use for caching snapshot entries in memory
 	Preimages           bool          // Whether to store preimage of trie key to the disk
+	SnapshotPath        string        // Where to store the snapshot data
 
 	SnapshotWait bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 }
@@ -359,6 +360,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 			}
 		}
 	}
+	log.Info("Snapshot status", "limit", bc.cacheConfig.SnapshotLimit, "path", bc.cacheConfig.SnapshotPath)
 	// Load any existing snapshot, regenerating it if loading failed
 	if bc.cacheConfig.SnapshotLimit > 0 {
 		// If the chain was rewound past the snapshot persistent layer (causing
@@ -366,13 +368,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		// in recovery mode and in that case, don't invalidate the snapshot on a
 		// head mismatch.
 		var recover bool
+		var snapdb ethdb.KeyValueStore = bc.db
+		if bc.cacheConfig.SnapshotPath != "" {
+			if subtabler, ok := bc.db.(ethdb.Subtabler); ok {
+				log.Info("Opening snapshot database", "path", bc.cacheConfig.SnapshotPath)
+				snapdb, err = subtabler.Subtable(bc.cacheConfig.SnapshotPath)
+				log.Info("Error generating subtable", "err", err, "db", bc.db, "snapdb", snapdb)
+			} else {
+				log.Warn("Database is not subtabler", "db", bc.db)
+			}
+		}
 
 		head := bc.CurrentBlock()
-		if layer := rawdb.ReadSnapshotRecoveryNumber(bc.db); layer != nil && *layer > head.NumberU64() {
+		if layer := rawdb.ReadSnapshotRecoveryNumber(snapdb); layer != nil && *layer > head.NumberU64() {
 			log.Warn("Enabling snapshot recovery", "chainhead", head.NumberU64(), "diskbase", *layer)
 			recover = true
 		}
-		bc.snaps, _ = snapshot.New(bc.db, bc.stateCache.TrieDB(), bc.cacheConfig.SnapshotLimit, head.Root(), !bc.cacheConfig.SnapshotWait, true, recover)
+		bc.snaps, err = snapshot.New(snapdb, bc.stateCache.TrieDB(), bc.cacheConfig.SnapshotLimit, head.Root(), !bc.cacheConfig.SnapshotWait, true, recover)
+		log.Warn("Setting up snapshotter", "snaps", bc.snaps, "err", err, "db", snapdb)
 	}
 	// Take ownership of this particular state
 	go bc.update()

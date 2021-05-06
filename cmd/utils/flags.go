@@ -125,6 +125,10 @@ var (
 		Name:  "datadir.overlay",
 		Usage: "Data directory for overlay leveldb (default = none)",
 	}
+	SnapsDBFlag = DirectoryFlag{
+		Name:  "datadir.snaps",
+		Usage: "Data directory for snapshots leveldb (default = none)",
+	}
 	KeyStoreDirFlag = DirectoryFlag{
 		Name:  "keystore",
 		Usage: "Directory for the keystore (default = inside the datadir)",
@@ -1600,6 +1604,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.GlobalIsSet(OverlayFlag.Name) {
 		cfg.DatabaseOverlay = ctx.GlobalString(OverlayFlag.Name)
+	}
+	if ctx.GlobalIsSet(SnapsDBFlag.Name) {
+		cfg.DatabaseSnaps = ctx.GlobalString(SnapsDBFlag.Name)
 	}
 
 	if gcmode := ctx.GlobalString(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {

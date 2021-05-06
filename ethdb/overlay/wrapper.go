@@ -156,3 +156,11 @@ func (wrapper *OverlayWrapperDB) NewIterator(start, end []byte) ethdb.Iterator {
     []byte{},
   }
 }
+
+func (wrapper *OverlayWrapperDB) Subtable(name string) (ethdb.KeyValueStore, error) {
+  if subtabler, ok := wrapper.overlay.(ethdb.Subtabler); ok {
+    // We don't wrap the subtable
+    return subtabler.Subtable(name)
+  }
+	return wrapper, nil
+}

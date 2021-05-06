@@ -80,6 +80,7 @@ type Database struct {
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
 
 	log log.Logger // Contextual logger tracking the database path
+	readonly bool
 }
 
 // New returns a wrapped LevelDB object. The namespace is the prefix that the
@@ -130,6 +131,7 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 		db:       db,
 		log:      logger,
 		quitChan: make(chan chan error),
+		readonly: options.ReadOnly,
 	}
 	ldb.compTimeMeter = metrics.NewRegisteredMeter(namespace+"compact/time", nil)
 	ldb.compReadMeter = metrics.NewRegisteredMeter(namespace+"compact/input", nil)
@@ -241,8 +243,11 @@ func (db *Database) Path() string {
 	return db.fn
 }
 
-func (db *Database) Subtable(name string) (*Database, error) {
-	return New(path.Join(db.fn, name), minCache * 100, minHandles * 8, name)
+func (db *Database) Subtable(name string) (ethdb.KeyValueStore, error) {
+	if path.IsAbs(name) {
+		return New(name, minCache * 100, minHandles * 8, name, db.readonly)
+	}
+	return New(path.Join(db.fn, name), minCache * 100, minHandles * 8, name, db.readonly)
 }
 
 // meter periodically retrieves internal leveldb counters and reports them to

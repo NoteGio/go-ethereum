@@ -61,6 +61,7 @@ var (
 		utils.BootnodesFlag,
 		utils.DataDirFlag,
 		utils.OverlayFlag,
+		utils.SnapsDBFlag,
 		utils.AncientFlag,
 		utils.MinFreeDiskSpaceFlag,
 		utils.KeyStoreDirFlag,
