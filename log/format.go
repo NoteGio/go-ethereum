@@ -343,7 +343,7 @@ func formatLogfmtValue(value interface{}, term bool) string {
 		if v == nil {
 			return "<nil>"
 		}
-		return formatLogfmtBigInt(v)
+		return v.String()
 	}
 	if term {
 		if s, ok := value.(TerminalStringer); ok {
@@ -369,17 +369,17 @@ func formatLogfmtValue(value interface{}, term bool) string {
 		return strconv.FormatInt(int64(v), 10)
 	// Larger integers get thousands separators.
 	case int:
-		return FormatLogfmtInt64(int64(v))
+		return strconv.FormatInt(int64(v), 10)
 	case int32:
-		return FormatLogfmtInt64(int64(v))
+		return strconv.FormatInt(int64(v), 10)
 	case int64:
-		return FormatLogfmtInt64(v)
+		return strconv.FormatInt(v, 10)
 	case uint:
-		return FormatLogfmtUint64(uint64(v))
+		return strconv.FormatInt(int64(v), 10)
 	case uint32:
-		return FormatLogfmtUint64(uint64(v))
+		return strconv.FormatInt(int64(v), 10)
 	case uint64:
-		return FormatLogfmtUint64(v)
+		return strconv.FormatInt(int64(v), 10)
 	case string:
 		return escapeString(v)
 	default:
