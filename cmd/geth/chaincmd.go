@@ -648,7 +648,7 @@ func freezerLoad(ctx *cli.Context) error {
 	var db ethdb.AncientStore
 	var err error
 	if strings.HasPrefix(ctx.Args()[0], "s3://") {
-		db, err = rawdb.NewS3Freezer(ctx.Args()[0], 128)
+		db, err = rawdb.NewS3Freezer(ctx.Args()[0], 128, false)
 	} else {
 		db, err = rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[1], 16, 16, ctx.Args()[0], "new", false)
 	}

@@ -38,6 +38,7 @@ type s3freezer struct {
   concurrency int
   wg sync.WaitGroup
   quit chan struct{}
+  readonly bool
 }
 
 type s3record struct {
@@ -55,7 +56,7 @@ func numToPath(number uint64) string {
   return path.Join(h[:x-4], h[x-4:x-2], h[x-2:])
 }
 
-func NewS3Freezer(path string, cacheSize int) (ethdb.AncientStore, error) {
+func NewS3Freezer(path string, cacheSize int, readonly bool) (ethdb.AncientStore, error) {
   path = strings.TrimPrefix(path, "s3://")
   parts := strings.SplitN(path, "/", 2)
   cache, err := lru.New(cacheSize)
@@ -68,6 +69,7 @@ func NewS3Freezer(path string, cacheSize int) (ethdb.AncientStore, error) {
     concurrency: runtime.NumCPU(),
     uploadCh: make(chan s3record),
     quit: make(chan struct{}),
+    readonly: readonly,
   }
   svc := s3.New(freezer.sess)
   output, err := svc.ListObjectsV2(&s3.ListObjectsV2Input{
@@ -187,6 +189,9 @@ func (f *s3freezer) AncientSize(kind string) (uint64, error) {
 // AppendAncient injects all binary blobs belong to block at the end of the
 // append-only immutable table files.
 func (f *s3freezer) AppendAncient(number uint64, hash, header, body, receipt, td []byte) error {
+  if f.readonly {
+    return errReadOnly
+  }
   log.Debug("Appending")
   f.uploadCh <- s3record{
     Hash: hash,
@@ -261,12 +266,15 @@ func (f *s3freezer) Sync() error {
 }
 
 func (f *s3freezer) Close() error {
-  f.quit <- struct{}{}
+  if !f.readonly {
+    f.quit <- struct{}{}
+  }
   close(f.uploadCh)
   return nil
 }
 
 func (f *s3freezer) freeze(db ethdb.KeyValueStore) {
+  if f.readonly { return }
 	nfdb := &nofreezedb{KeyValueStore: db}
  	backoff := false
 	for {

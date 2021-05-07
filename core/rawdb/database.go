@@ -146,7 +146,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, freezerPath string, namespac
 	var frdb ethdb.AncientStore
 	var err error
 	if strings.HasPrefix(freezerPath, "s3://") {
-		frdb, err = NewS3Freezer(freezerPath, 128) // TODO: Configurable cache size?
+		frdb, err = NewS3Freezer(freezerPath, 128, readonly) // TODO: Configurable cache size?
 		log.Info("Creating s3 freezer", "path", freezerPath)
 	} else {
 		frdb, err = newFreezer(freezerPath, namespace, readonly)
