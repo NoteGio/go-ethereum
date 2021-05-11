@@ -159,7 +159,7 @@ func (backend *ReplicaBackend) GetTd(ctx context.Context, blockHash common.Hash)
   return backend.hc.GetTdByHash(blockHash)
 }
 	// Use core.NewEVMContext and vm.NewEVM - Will need custom ChainContext implementation
-func (backend *ReplicaBackend) GetEVM(ctx context.Context, msg core.Message, state *state.StateDB, header *types.Header, cfg *vm.Config) (*vm.EVM, func() error, error) {
+func (backend *ReplicaBackend) GetEVM(ctx context.Context, msg core.Message, state *state.StateDB, header *types.Header, vmConfig *vm.Config) (*vm.EVM, func() error, error) {
   vmError := func() error {
     if backend.evmSemaphore != nil {
       <-backend.evmSemaphore
@@ -172,7 +172,10 @@ func (backend *ReplicaBackend) GetEVM(ctx context.Context, msg core.Message, sta
 
   txContext := core.NewEVMTxContext(msg)
   evmContext := core.NewEVMBlockContext(header, backend.bc, nil)
-  evm := vm.NewEVM(evmContext, txContext, state, backend.chainConfig, *cfg)
+  if vmConfig == nil {
+    vmConfig = backend.bc.GetVMConfig()
+  }
+  evm := vm.NewEVM(evmContext, txContext, state, backend.chainConfig, *vmConfig)
   if backend.evmSemaphore != nil {
     backend.evmSemaphore <- struct{}{}
   }
