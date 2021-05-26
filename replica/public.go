@@ -3,6 +3,7 @@ package replica
 import (
 	"math/big"
 	"github.com/ethereum/go-ethereum/common"
+	ethprotocol "github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -40,6 +41,11 @@ func (api *PublicEthereumAPI) ChainId() hexutil.Uint64 {
 	}
 	return (hexutil.Uint64)(chainID.Uint64())
 }
+
+func (api *PublicEthereumAPI) ProtocolVersion() hexutil.Uint64 {
+	return (hexutil.Uint64)(ethprotocol.ProtocolVersions[0])
+}
+
 
 // Mining returns an indication if this node is currently mining.
 func (api *PublicEthereumAPI) Mining() bool {
