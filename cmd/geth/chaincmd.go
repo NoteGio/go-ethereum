@@ -30,6 +30,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	_ "net/http/pprof"
+	"net/http"
 
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
@@ -743,7 +745,7 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 	errCh := make(chan error)
 	go func() {
 		count := 10000
-		sched := state.NewStateSync(root, newDb, trie.NewSyncBloom(1, newDb), nil)
+		sched := state.NewStateSync(root, newDb, trie.NewSyncBloom(1024, newDb), nil)
 		log.Info("Syncing", "root", root)
 		missingNodes, _, missingCodes := sched.Missing(count)
 		nodeQueue := append([]common.Hash{}, missingNodes...)
@@ -754,8 +756,8 @@ func syncState(root common.Hash, srcDb state.Database, newDb ethdb.Database) <-c
 			var wg sync.WaitGroup
 			nodeCh := make(chan trieRequest, runtime.NumCPU())
 			codeCh := make(chan trieRequest, runtime.NumCPU())
-			popCh := make(chan trieRequest, runtime.NumCPU())
-			for i := 0; i < runtime.NumCPU(); i++ {
+			popCh := make(chan trieRequest, runtime.NumCPU() * 10)
+			for i := 0; i < runtime.NumCPU() * 10; i++ {
 				wg.Add(1)
 				go func(wg *sync.WaitGroup) {
 					defer wg.Done()
@@ -832,9 +834,18 @@ func repairFreezerIndex(ctx *cli.Context) error {
 
 func migrateState(ctx *cli.Context) error {
 	if len(ctx.Args()) < 3 {
-    return fmt.Errorf("Usage: migrateState [ancients] [oldLeveldb] [newLeveldb] [?kafkaTopic]")
-  }
-	newDb, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[2], 16, 16, ctx.Args()[0], "new", false)
+		return fmt.Errorf("Usage: migrateState [ancients] [oldLeveldb] [newLeveldb] [?kafkaTopic]")
+	}
+	p := &http.Server{
+		Addr: fmt.Sprintf(":6969"),
+		Handler: http.DefaultServeMux,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+	go p.ListenAndServe()
+
+
+	newDb, err := rawdb.NewLevelDBDatabaseWithFreezer(ctx.Args()[2], 256, 256, ctx.Args()[0], "new", false)
 	if err != nil {
 		log.Crit("Error new opening database")
 		return err
@@ -847,7 +858,7 @@ func migrateState(ctx *cli.Context) error {
 	if frozen == 0 {
 		return fmt.Errorf("Freezer is empty")
 	}
-	oldDb, err := rawdb.NewLevelDBDatabase(ctx.Args()[1], 16, 16, "old", true)
+	oldDb, err := rawdb.NewLevelDBDatabase(ctx.Args()[1], 256, 256, "old", true)
 	if err != nil {
 		log.Crit("Error old opening database")
 		return err
