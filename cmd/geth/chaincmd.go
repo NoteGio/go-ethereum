@@ -1062,6 +1062,11 @@ func migrateState(ctx *cli.Context) error {
 		log.Crit("error syncing latest")
 		return err
 	}
+
+	rawdb.WriteHeadBlockHash(newDb, block.Hash())
+	rawdb.WriteHeadHeaderHash(newDb, block.Hash())
+	rawdb.WriteHeadFastBlockHash(newDb, block.Hash())
+
 	// Get the 10 blocks prior to the latest, to account for reorgs. This should
 	// go quickly, since most of the latest state will overlap with these.
 	for i := 0; i < 10; i++ {
@@ -1071,10 +1076,6 @@ func migrateState(ctx *cli.Context) error {
 		}
 	}
 
-
-	rawdb.WriteHeadBlockHash(newDb, block.Hash())
-	rawdb.WriteHeadHeaderHash(newDb, block.Hash())
-	rawdb.WriteHeadFastBlockHash(newDb, block.Hash())
 	return nil
 }
 
