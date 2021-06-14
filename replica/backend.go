@@ -71,7 +71,19 @@ func (backend *ReplicaBackend) Downloader() *downloader.Downloader {								// S
 func (backend *ReplicaBackend) ProtocolVersion() int {
   return int(backend.chainConfig.ChainID.Int64())
 }
-func (backend *ReplicaBackend) SuggestPrice(ctx context.Context) (*big.Int, error) {
+// func (backend *ReplicaBackend) SuggestPrice(ctx context.Context) (*big.Int, error) {
+//   if ctx != nil { if err := ctx.Err(); err != nil { return nil, err } }
+//   if backend.gpo == nil {
+//     backend.gpo = gasprice.NewOracle(backend, gasprice.Config{
+//       Blocks:     20,
+//       Percentile: 60,
+//       Default: new(big.Int),
+//     })
+//   }
+//   return backend.gpo.SuggestPrice(ctx)
+// }
+
+func (backend *ReplicaBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
   if ctx != nil { if err := ctx.Err(); err != nil { return nil, err } }
   if backend.gpo == nil {
     backend.gpo = gasprice.NewOracle(backend, gasprice.Config{
@@ -80,8 +92,9 @@ func (backend *ReplicaBackend) SuggestPrice(ctx context.Context) (*big.Int, erro
       Default: new(big.Int),
     })
   }
-  return backend.gpo.SuggestPrice(ctx)
+	return backend.gpo.SuggestTipCap(ctx)
 }
+
 func (backend *ReplicaBackend) ChainDb() ethdb.Database {
   return backend.db
 }
@@ -229,7 +242,7 @@ func (backend *ReplicaBackend) SendTx(ctx context.Context, signedTx *types.Trans
   if err != nil {
     return err
   }
-  msg, err := signedTx.AsMessage(types.MakeSigner(backend.chainConfig, header.Number))
+  msg, err := signedTx.AsMessage(types.MakeSigner(backend.chainConfig, header.Number), header.BaseFee)
   if err != nil {
     return err
   }
@@ -326,7 +339,7 @@ func (backend *ReplicaBackend) ServiceFilter(ctx context.Context, session *bloom
 
 	// GetPoolTransactions returns all pending tranactions in the pool
 func (backend *ReplicaBackend) GetPoolTransactions() (types.Transactions, error) {
-  pending, err := backend.txPool.Pending()
+  pending, err := backend.txPool.Pending(false)
   if err != nil {
     return nil, err
   }

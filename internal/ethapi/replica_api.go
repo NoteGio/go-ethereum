@@ -18,7 +18,7 @@ func NewEtherCattleBlockChainAPI(b Backend) *EtherCattleBlockChainAPI {
 
 // EstimateGasList returns an estimate of the amount of gas needed to execute list of
 // given transactions against the current pending block.
-func (s *EtherCattleBlockChainAPI) EstimateGasList(ctx context.Context, argsList []CallArgs, precise *bool) ([]hexutil.Uint64, error) {
+func (s *EtherCattleBlockChainAPI) EstimateGasList(ctx context.Context, argsList []TransactionArgs, precise *bool) ([]hexutil.Uint64, error) {
   fast := precise == nil || !*precise
   blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
   var (
