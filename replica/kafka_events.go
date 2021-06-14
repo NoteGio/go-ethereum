@@ -898,7 +898,7 @@ func (consumer *KafkaEventConsumer) Start() {
 }
 
 
-func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock common.Hash, offsets map[int32]int64, rollback int64, startingBlockNumber uint64) (EventConsumer, error) {
+func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock common.Hash, offsets map[int32]int64, rollback int64, startingBlockNumber uint64, finishedLimit int) (EventConsumer, error) {
   brokers, config := cdc.ParseKafkaURL(brokerURL)
   if err := cdc.CreateTopicIfDoesNotExist(brokerURL, topic, -1, nil); err != nil {
     return nil, err
@@ -948,7 +948,7 @@ func NewKafkaEventConsumerFromURLs(brokerURL, topic string, lastEmittedBlock com
       finished: make(map[common.Hash]bool),
       oldFinished: make(map[common.Hash]bool),
       skipped: make(map[common.Hash]bool),
-      finishedLimit: 128,
+      finishedLimit: finishedLimit,
       lastEmittedBlock: lastEmittedBlock,
       pendingEmits: make(map[common.Hash]map[common.Hash]struct{}),
       pendingHashes: make(map[common.Hash]struct{}),
