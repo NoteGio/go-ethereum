@@ -150,6 +150,7 @@ func (f *s3freezer) Ancient(kind string, number uint64) ([]byte, error) {
     if err != nil {
       return nil, err
     }
+    defer value.Body.Close()
     content, err = ioutil.ReadAll(snappy.NewReader(value.Body))
     if err != nil {
       return nil, err
@@ -225,7 +226,7 @@ func (f *s3freezer) uploader() {
             buff := &bytes.Buffer{}
             writer := snappy.NewWriter(buff)
             writer.Write(data)
-            writer.Flush()
+            writer.Close()
             svc := s3.New(f.sess)
             key := numToPath(record.number)
             _, err = svc.PutObject(&s3.PutObjectInput{
