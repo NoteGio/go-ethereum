@@ -122,6 +122,7 @@ func NewKafkaTransactionConsumerFromURLs(brokerURL, topic string) (TransactionCo
   if err := cdc.CreateTopicIfDoesNotExist(brokerURL, topic, 0, configEntries); err != nil {
     return nil, err
   }
+  config.Producer.Retry.Max = 10
   client, err := sarama.NewClient(brokers, config)
   if err != nil {
     return nil, err
