@@ -86,7 +86,7 @@ func TestSuggestPrice(t *testing.T) {
   if err != nil {
     t.Fatalf(err.Error())
   }
-  price, err := backend.SuggestPrice(context.Background())
+  price, err := backend.SuggestGasTipCap(context.Background())
   if err != nil {
     t.Fatalf(err.Error())
   }
@@ -274,7 +274,7 @@ func TestGetEVM(t *testing.T) {
   if err != nil {
     t.Fatalf(err.Error())
   }
-  msg := types.NewMessage(common.Address{}, &common.Address{}, 0, new(big.Int), 0, new(big.Int), []byte{}, types.AccessList{}, false)
+  msg := types.NewMessage(common.Address{}, &common.Address{}, 0, new(big.Int), 0, new(big.Int), new(big.Int), new(big.Int), []byte{}, types.AccessList{}, false)
   state, header, err := backend.StateAndHeaderByNumber(context.Background(), rpc.EarliestBlockNumber)
   if err != nil {
     t.Fatalf(err.Error())
