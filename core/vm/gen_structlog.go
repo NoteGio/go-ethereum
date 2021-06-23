@@ -23,12 +23,12 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		Memory        hexutil.Bytes               `json:"memory"`
 		MemorySize    int                         `json:"memSize"`
 		Stack         []*math.HexOrDecimal256     `json:"stack"`
-		ReturnStack   []math.HexOrDecimal64       `json:"returnStack"`
 		ReturnData    hexutil.Bytes               `json:"returnData"`
 		Storage       map[common.Hash]common.Hash `json:"-"`
 		Depth         int                         `json:"depth"`
 		RefundCounter uint64                      `json:"refund"`
 		Err           error                       `json:"-"`
+		Duration      int64                       `json:"duration"`
 		OpName        string                      `json:"opName"`
 		ErrorString   string                      `json:"error"`
 	}
@@ -50,6 +50,7 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 	enc.Depth = s.Depth
 	enc.RefundCounter = s.RefundCounter
 	enc.Err = s.Err
+	enc.Duration = s.Duration
 	enc.OpName = s.OpName()
 	enc.ErrorString = s.ErrorString()
 	return json.Marshal(&enc)
@@ -70,6 +71,7 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 		Depth         *int                        `json:"depth"`
 		RefundCounter *uint64                     `json:"refund"`
 		Err           error                       `json:"-"`
+		Duration      *int64                      `json:"duration"`
 	}
 	var dec StructLog
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -113,6 +115,9 @@ func (s *StructLog) UnmarshalJSON(input []byte) error {
 	}
 	if dec.Err != nil {
 		s.Err = dec.Err
+	}
+	if dec.Duration != nil {
+		s.Duration = *dec.Duration
 	}
 	return nil
 }

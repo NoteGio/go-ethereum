@@ -72,6 +72,7 @@ type StructLog struct {
 	Depth         int                         `json:"depth"`
 	RefundCounter uint64                      `json:"refund"`
 	Err           error                       `json:"-"`
+	Duration      int64                      `json:"duration"`
 }
 
 // overrides for gencodec
