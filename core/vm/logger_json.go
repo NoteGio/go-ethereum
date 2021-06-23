@@ -29,12 +29,13 @@ import (
 type JSONLogger struct {
 	encoder *json.Encoder
 	cfg     *LogConfig
+	lastOp  time.Time
 }
 
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
 // into the provided stream.
 func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
-	l := &JSONLogger{json.NewEncoder(writer), cfg}
+	l := &JSONLogger{json.NewEncoder(writer), cfg, time.Now()}
 	if l.cfg == nil {
 		l.cfg = &LogConfig{}
 	}
@@ -42,6 +43,7 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 }
 
 func (l *JSONLogger) CaptureStart(env *EVM, from, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+	l.lastOp = time.Now()
 }
 
 func (l *JSONLogger) CaptureFault(*EVM, uint64, OpCode, uint64, uint64, *ScopeContext, int, error) {}
@@ -61,7 +63,9 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 		Depth:         depth,
 		RefundCounter: env.StateDB.GetRefund(),
 		Err:           err,
+		Duration:      time.Since(l.lastOp).Nanoseconds(),
 	}
+	defer func() { l.lastOp = time.Now() }() // Deferring leaves the time spent in the tracer out of the final report
 	if !l.cfg.DisableMemory {
 		log.Memory = memory.Data()
 	}

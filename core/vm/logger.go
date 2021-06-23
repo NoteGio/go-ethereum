@@ -72,6 +72,7 @@ type StructLog struct {
 	Depth         int                         `json:"depth"`
 	RefundCounter uint64                      `json:"refund"`
 	Err           error                       `json:"-"`
+	Duration      int64                      `json:"duration"`
 }
 
 // overrides for gencodec
@@ -122,6 +123,7 @@ type StructLogger struct {
 	logs    []StructLog
 	output  []byte
 	err     error
+	lastOp    time.Time
 }
 
 // NewStructLogger returns a new logger
@@ -137,6 +139,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (l *StructLogger) CaptureStart(env *EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+	l.lastOp = time.Now()
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -196,7 +199,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, env.StateDB.GetRefund(), err}
+	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, env.StateDB.GetRefund(), err, time.Since(l.lastOp).Nanoseconds()}
 	l.logs = append(l.logs, log)
 }
 
