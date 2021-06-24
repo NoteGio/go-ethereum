@@ -200,6 +200,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 	}
 	// create a new snapshot of the EVM.
 	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, env.StateDB.GetRefund(), err, time.Since(l.lastOp).Nanoseconds()}
+	l.lastOp = time.Now()
 	l.logs = append(l.logs, log)
 }
 

@@ -1150,6 +1150,7 @@ type StructLogRes struct {
 	Stack   *[]string          `json:"stack,omitempty"`
 	Memory  *[]string          `json:"memory,omitempty"`
 	Storage *map[string]string `json:"storage,omitempty"`
+	Duration int64            `json:"duration"`
 }
 
 // FormatLogs formats EVM returned structured logs for json output
@@ -1163,6 +1164,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 			GasCost: trace.GasCost,
 			Depth:   trace.Depth,
 			Error:   trace.Err,
+			Duration: trace.Duration,
 		}
 		if trace.Stack != nil {
 			stack := make([]string, len(trace.Stack))
