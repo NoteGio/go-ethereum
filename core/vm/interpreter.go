@@ -19,6 +19,7 @@ package vm
 import (
 	"hash"
 	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -204,6 +205,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// parent context.
 	steps := 0
 	for {
+		lstart := time.Now()
+		defer func() {log.Trace("Whole loop", "d", time.Since(lstart)) }()
 		steps++
 		if steps%1000 == 0 && atomic.LoadInt32(&in.evm.abort) != 0 {
 			break
@@ -216,7 +219,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
+		log.Trace("GetOp", "op", op, "d", time.Since(lstart))
 		operation := in.cfg.JumpTable[op]
+		log.Trace("Lookup JT", "op", op, "d", time.Since(lstart))
 		if operation == nil {
 			return nil, &ErrInvalidOpCode{opcode: op}
 		}
@@ -226,6 +231,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
+		log.Trace("Validated stack", "d", time.Since(lstart))
 		// If the operation is valid, enforce write restrictions
 		if in.readOnly && in.evm.chainRules.IsByzantium {
 			// If the interpreter is operating in readonly mode, make sure no
@@ -237,11 +243,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, ErrWriteProtection
 			}
 		}
+		log.Trace("Write protection", "d", time.Since(lstart))
 		// Static portion of gas
 		cost = operation.constantGas // For tracing
 		if !contract.UseGas(operation.constantGas) {
 			return nil, ErrOutOfGas
 		}
+		log.Trace("Use Gas (constant)", "d", time.Since(lstart))
 
 		var memorySize uint64
 		// calculate the new memory size and expand the memory to fit
@@ -259,32 +267,39 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, ErrGasUintOverflow
 			}
 		}
+		log.Trace("Calc memsize", "memsize", memorySize, "d", time.Since(lstart))
 		// Dynamic portion of gas
 		// consume the gas and return an error if not enough gas is available.
 		// cost is explicitly set so that the capture state defer method can get the proper cost
 		if operation.dynamicGas != nil {
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, stack, mem, memorySize)
+			log.Trace("Calc dynamicCost", "dynamicCost", dynamicCost, "d", time.Since(lstart))
 			cost += dynamicCost // total cost, for debug tracing
 			if err != nil || !contract.UseGas(dynamicCost) {
 				return nil, ErrOutOfGas
 			}
+			log.Trace("Use Gas (dynamic)", "d", time.Since(lstart))
 		}
 		if memorySize > 0 {
 			mem.Resize(memorySize)
+			log.Trace("Resize memory", "d", time.Since(lstart))
 		}
 
 		if in.cfg.Debug {
 			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err)
 			logged = true
+			log.Trace("Capture state", "d", time.Since(lstart))
 		}
 
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
+		log.Trace("Execute op", "d", time.Since(lstart))
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
 		if operation.returns {
 			in.returnData = common.CopyBytes(res)
+			log.Trace("Copy returns", "d", time.Since(lstart))
 		}
 
 		switch {
