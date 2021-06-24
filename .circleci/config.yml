@@ -33,8 +33,8 @@ jobs:
             sudo apt install gcc-aarch64-linux-gnu libc6-dev-arm64-cross wget -y
             export GOPATH=$HOME/go
             export GOARCH=amd64
-            wget https://golang.org/dl/go1.15.5.linux-amd64.tar.gz
-            tar -xzvf go1.15.5.linux-amd64.tar.gz
+            wget https://golang.org/dl/go1.15.13.linux-amd64.tar.gz
+            tar -xzvf go1.15.13.linux-amd64.tar.gz
             go/bin/go build -o geth-amd64 ./cmd/geth
             CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOARCH=arm64  go/bin/go build -o geth-arm64 ./cmd/geth
       # - run:
