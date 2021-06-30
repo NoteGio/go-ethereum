@@ -755,7 +755,7 @@ func NewKafkaEventProducerFromURLs(brokerURL, topic string, db ethdb.Database) (
     return nil, err
   }
   config.Producer.Return.Successes=true
-  config.Producer.MaxMessageBytes = 5000012
+  config.Producer.MaxMessageBytes = 10000024
   producer, err := sarama.NewAsyncProducer(brokers, config)
   if err != nil {
     return nil, err

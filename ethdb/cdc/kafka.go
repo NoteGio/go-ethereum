@@ -185,7 +185,7 @@ func CreateTopicIfDoesNotExist(brokerAddr, topic string, numPartitions int32, co
     log.Info("Attempting to create topic")
     topicDetails := make(map[string]*sarama.TopicDetail)
 
-    maxBytes := "5000012"
+    maxBytes := "10000024"
     configEntries["max.message.bytes"] = &maxBytes
     replicationFactor := int16(len(client.Brokers()))
     if replicationFactor > 3 {
@@ -223,7 +223,7 @@ func NewKafkaLogProducerFromURL(brokerURL, topic string) (LogProducer, error) {
   if err := CreateTopicIfDoesNotExist(brokerURL, topic, 1, nil); err != nil {
     return nil, err
   }
-  config.Producer.MaxMessageBytes = 5000012
+  config.Producer.MaxMessageBytes = 10000024
   producer, err := sarama.NewAsyncProducer(brokers, config)
   if err != nil {
     return nil, err
