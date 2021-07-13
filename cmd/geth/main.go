@@ -507,9 +507,11 @@ func startNode(ctx *cli.Context, stack *node.Node, backend ethapi.Backend) {
 			log.Info("Broker url missing")
 		}
 
-		threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name)
-		if err := ethBackend.StartMining(threads); err != nil {
-			utils.Fatalf("Failed to start mining: %v", err)
+		if ctx.GlobalBool(utils.MiningEnabledFlag.Name) || isDeveloperMode {
+			threads := ctx.GlobalInt(utils.MinerThreadsFlag.Name)
+			if err := ethBackend.StartMining(threads); err != nil {
+				utils.Fatalf("Failed to start mining: %v", err)
+			}
 		}
 	}
 }
