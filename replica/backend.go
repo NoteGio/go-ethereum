@@ -667,6 +667,18 @@ func (backend *ReplicaBackend) initSnapshot() error {
   // return err
 }
 
+func (b *ReplicaBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
+	return nil, nil
+}
+
+func (b *ReplicaBackend) FeeHistory(ctx context.Context, blockCount int, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (firstBlock rpc.BlockNumber, reward [][]*big.Int, baseFee []*big.Int, gasUsedRatio []float64, err error) {
+	return b.gpo.FeeHistory(ctx, blockCount, lastBlock, rewardPercentiles)
+}
+
+func (b *ReplicaBackend) TxPoolContentFrom(addr common.Address) (types.Transactions, types.Transactions) {
+	return b.txPool.ContentFrom(addr)
+}
+
 func NewTestReplicaBackend(db ethdb.Database, hc *core.HeaderChain, bc *core.BlockChain, tp TransactionProducer) (*ReplicaBackend) {
   backend := &ReplicaBackend{
     db: db,
